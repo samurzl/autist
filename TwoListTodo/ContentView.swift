@@ -510,7 +510,7 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if items.isEmpty {
-                    if #available(iOS 17.0, *) {
+                    if #available(iOS 17.0, macOS 14.0, *) {
                         ContentUnavailableView("No active tasks", systemImage: "tray")
                     } else {
                         UnavailableContentView(title: "No active tasks", systemImage: "tray")
@@ -580,7 +580,7 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if series.isEmpty {
-                    if #available(iOS 17.0, *) {
+                    if #available(iOS 17.0, macOS 14.0, *) {
                         ContentUnavailableView("No recurring series", systemImage: "repeat")
                     } else {
                         UnavailableContentView(title: "No recurring series", systemImage: "repeat")
@@ -624,7 +624,7 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if graveyard.isEmpty {
-                    if #available(iOS 17.0, *) {
+                    if #available(iOS 17.0, macOS 14.0, *) {
                         ContentUnavailableView("No completed tasks", systemImage: "archivebox")
                     } else {
                         UnavailableContentView(title: "No completed tasks", systemImage: "archivebox")
