@@ -529,11 +529,7 @@ private struct WorkAreaView: View {
         .listStyle(.insetGrouped)
 #endif
         .toolbar {
-#if os(macOS)
-            ToolbarItem(placement: .automatic) {
-#else
-            ToolbarItem(placement: .topBarTrailing) {
-#endif
+            ToolbarItem(placement: toolbarPlacement) {
                 Menu {
                     Button {
                         activeSheet = .recurringSeries
@@ -574,6 +570,14 @@ private struct WorkAreaView: View {
                 .joined(separator: ", ")
             return "Weekly on \(days)"
         }
+    }
+
+    private var toolbarPlacement: ToolbarItemPlacement {
+#if os(macOS)
+        return .automatic
+#else
+        return .topBarTrailing
+#endif
     }
 
     private var recurringSeriesView: some View {
