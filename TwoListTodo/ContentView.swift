@@ -309,9 +309,13 @@ private struct TodoItemRow: View {
                             .foregroundStyle(.secondary)
 
                         if let dueDate = item.dueDate {
-                            Label(dueDate, systemImage: "calendar")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Label {
+                                Text(dueDate, style: .date)
+                            } icon: {
+                                Image(systemName: "calendar")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         } else {
                             Text("No due date")
                                 .font(.caption)
