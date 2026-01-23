@@ -99,12 +99,19 @@ private final class AppStatePersistence {
     private let iCloudStore = NSUbiquitousKeyValueStore.default
 
     func load() -> AppState? {
+        iCloudStore.synchronize()
         if let data = iCloudStore.data(forKey: iCloudKey),
            let state = decode(from: data) {
             return state
         }
 
         guard let data = UserDefaults.standard.data(forKey: localKey) else { return nil }
+        return decode(from: data)
+    }
+
+    func loadFromICloud() -> AppState? {
+        iCloudStore.synchronize()
+        guard let data = iCloudStore.data(forKey: iCloudKey) else { return nil }
         return decode(from: data)
     }
 
@@ -187,10 +194,15 @@ private final class AppStateStore: ObservableObject {
         NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let state = AppStatePersistence.shared.load() else { return }
+                guard let state = AppStatePersistence.shared.loadFromICloud() else { return }
                 self?.apply(state)
             }
             .store(in: &cancellables)
+    }
+
+    func refreshFromICloud() {
+        guard let state = AppStatePersistence.shared.loadFromICloud() else { return }
+        apply(state)
     }
 
     private func autosaveChanges() {
@@ -286,6 +298,7 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { newValue in
                 if newValue == .active {
+                    store.refreshFromICloud()
                     processRecurringSeries()
                 }
             }
@@ -505,6 +518,7 @@ private struct WorkAreaView: View {
     let onAddSeriesTapped: () -> Void
 
     @State private var activeSheet: WorkAreaSheet? = nil
+    @State private var editingSeries: RecurringSeries? = nil
 
     var body: some View {
         List {
@@ -558,6 +572,11 @@ private struct WorkAreaView: View {
                 }
             }
         }
+        .sheet(item: $editingSeries) { series in
+            EditSeriesSheet(series: series) { updated in
+                updateSeries(updated)
+            }
+        }
     }
 
     private func seriesDescription(_ series: RecurringSeries) -> String {
@@ -599,9 +618,17 @@ private struct WorkAreaView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            editingSeries = entry
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
                 }
                 .onDelete { offsets in
-                    series.remove(atOffsets: offsets)
+                    removeSeries(at: offsets)
                 }
 
                 Button {
@@ -651,6 +678,36 @@ private struct WorkAreaView: View {
         .listStyle(.insetGrouped)
 #endif
         .navigationTitle("Task Graveyard")
+    }
+
+    private func removeSeries(at offsets: IndexSet) {
+        let ids = offsets.map { series[$0].id }
+        series.remove(atOffsets: offsets)
+        items.removeAll { item in
+            guard let seriesID = item.seriesID else { return false }
+            return ids.contains(seriesID)
+        }
+        graveyard.removeAll { item in
+            guard let seriesID = item.seriesID else { return false }
+            return ids.contains(seriesID)
+        }
+    }
+
+    private func updateSeries(_ updated: RecurringSeries) {
+        guard let index = series.firstIndex(where: { $0.id == updated.id }) else { return }
+        var newSeries = updated
+        newSeries.lastGeneratedDate = series[index].lastGeneratedDate
+        series[index] = newSeries
+        for itemIndex in items.indices {
+            if items[itemIndex].seriesID == updated.id {
+                items[itemIndex].title = updated.title
+            }
+        }
+        for itemIndex in graveyard.indices {
+            if graveyard[itemIndex].seriesID == updated.id {
+                graveyard[itemIndex].title = updated.title
+            }
+        }
     }
 }
 
@@ -1089,6 +1146,103 @@ private struct AddSeriesSheet: View {
     }
 
     private var isAddDisabled: Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return true
+        }
+        if frequency == .weekly {
+            return weeklyDays.isEmpty
+        }
+        return false
+    }
+}
+
+private struct EditSeriesSheet: View {
+    let series: RecurringSeries
+    let onSave: (RecurringSeries) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title: String
+    @State private var frequency: RecurrenceFrequency
+    @State private var intervalDays: Int
+    @State private var weeklyDays: Set<Weekday>
+
+    init(series: RecurringSeries, onSave: @escaping (RecurringSeries) -> Void) {
+        self.series = series
+        self.onSave = onSave
+        _title = State(initialValue: series.title)
+        _frequency = State(initialValue: series.frequency)
+        _intervalDays = State(initialValue: series.intervalDays)
+        _weeklyDays = State(initialValue: series.weeklyDays)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Series") {
+                    TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
+                    Picker("Frequency", selection: $frequency) {
+                        ForEach(RecurrenceFrequency.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                }
+
+                if frequency == .everyDays {
+                    Section("Every X days") {
+                        Stepper("Every \(intervalDays) days", value: $intervalDays, in: 1...30)
+                    }
+                } else {
+                    Section("Weekly on") {
+                        ForEach(Weekday.allCases) { day in
+                            Toggle(day.rawValue, isOn: Binding(
+                                get: { weeklyDays.contains(day) },
+                                set: { isOn in
+                                    if isOn {
+                                        weeklyDays.insert(day)
+                                    } else {
+                                        weeklyDays.remove(day)
+                                    }
+                                }
+                            ))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit Recurring Series")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        var updated = series
+                        updated.title = trimmed
+                        updated.frequency = frequency
+                        if frequency == .everyDays {
+                            updated.intervalDays = intervalDays
+                            updated.weeklyDays = []
+                        } else {
+                            updated.weeklyDays = weeklyDays
+                        }
+                        onSave(updated)
+                        dismiss()
+                    }
+                    .disabled(isSaveDisabled)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var isSaveDisabled: Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return true
