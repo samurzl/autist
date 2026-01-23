@@ -472,7 +472,11 @@ private struct ItemsListView: View {
                     Text("Tap the left button to move an item into the work area.")
                 }
             }
+#if os(macOS)
+            .listStyle(.inset)
+#else
             .listStyle(.insetGrouped)
+#endif
 
             Button {
                 onAddTapped()
@@ -519,9 +523,17 @@ private struct WorkAreaView: View {
                 Text(title)
             }
         }
+#if os(macOS)
+        .listStyle(.inset)
+#else
         .listStyle(.insetGrouped)
+#endif
         .toolbar {
+#if os(macOS)
+            ToolbarItem(placement: .automatic) {
+#else
             ToolbarItem(placement: .topBarTrailing) {
+#endif
                 Menu {
                     Button {
                         activeSheet = .recurringSeries
@@ -600,7 +612,11 @@ private struct WorkAreaView: View {
                 Text("Recurring series generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
             }
         }
+#if os(macOS)
+        .listStyle(.inset)
+#else
         .listStyle(.insetGrouped)
+#endif
         .navigationTitle("Recurring Series")
     }
 
@@ -625,7 +641,11 @@ private struct WorkAreaView: View {
                 Text("Restore a task to put it back in the work area.")
             }
         }
+#if os(macOS)
+        .listStyle(.inset)
+#else
         .listStyle(.insetGrouped)
+#endif
         .navigationTitle("Task Graveyard")
     }
 }
@@ -839,7 +859,9 @@ private struct WorkItemRow: View {
 
                     HStack(spacing: 8) {
                         TextField("Add subtask", text: $subtaskDraft)
+#if os(iOS)
                             .textInputAutocapitalization(.sentences)
+#endif
                         Button("Add") {
                             addSubtask()
                         }
@@ -939,6 +961,9 @@ private struct AddItemSheet: View {
             Form {
                 Section("Details") {
                     TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
                     Stepper("Priority \(priority)", value: $priority, in: 1...5)
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
@@ -1001,6 +1026,9 @@ private struct AddSeriesSheet: View {
             Form {
                 Section("Series") {
                     TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
                     Picker("Frequency", selection: $frequency) {
                         ForEach(RecurrenceFrequency.allCases) { option in
                             Text(option.rawValue).tag(option)
