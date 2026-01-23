@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Two-List Todo (iPhone)</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <div>
+          <p class="eyebrow">Today on iPhone</p>
+          <h1>Two-List Todo</h1>
+        </div>
+        <div class="legend">
+          <span class="legend__item">
+            <span class="dot dot--active"></span> Active
+          </span>
+          <span class="legend__item">
+            <span class="dot dot--waiting"></span> Waiting
+          </span>
+        </div>
+      </header>
+
+      <section class="list" data-list="must">
+        <div class="list__header">
+          <h2>Must-do</h2>
+          <p>Prioritized essentials with due dates and focus flow.</p>
+        </div>
+        <form class="item-form" data-form="must">
+          <div class="item-form__row">
+            <label>
+              Task
+              <input
+                type="text"
+                name="title"
+                placeholder="Pay rent, submit report, etc."
+                required
+              />
+            </label>
+          </div>
+          <div class="item-form__row item-form__row--split">
+            <label>
+              Priority (1-5)
+              <input type="number" name="priority" min="1" max="5" value="3" />
+            </label>
+            <label>
+              Due date
+              <input type="date" name="dueDate" />
+            </label>
+          </div>
+          <button type="submit">Add Must-do</button>
+        </form>
+
+        <div class="list__columns">
+          <div
+            class="column"
+            data-drop-zone="must-backlog"
+            aria-label="Must-do backlog"
+          >
+            <div class="column__header">
+              <h3>Must-do list</h3>
+              <span class="pill">Drag to working</span>
+            </div>
+            <div class="items" data-items="must-backlog"></div>
+          </div>
+          <div
+            class="column column--work"
+            data-drop-zone="must-working"
+            aria-label="Must-do working"
+          >
+            <div class="column__header">
+              <h3>Working area</h3>
+              <span class="pill pill--work">In focus</span>
+            </div>
+            <div class="items" data-items="must-working"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="list" data-list="want">
+        <div class="list__header">
+          <h2>Want-to</h2>
+          <p>Nice-to-have items, sorted by priority and due dates.</p>
+        </div>
+        <form class="item-form" data-form="want">
+          <div class="item-form__row">
+            <label>
+              Task
+              <input
+                type="text"
+                name="title"
+                placeholder="Read article, try new recipe..."
+                required
+              />
+            </label>
+          </div>
+          <div class="item-form__row item-form__row--split">
+            <label>
+              Priority (1-5)
+              <input type="number" name="priority" min="1" max="5" value="2" />
+            </label>
+            <label>
+              Due date
+              <input type="date" name="dueDate" />
+            </label>
+          </div>
+          <button type="submit">Add Want-to</button>
+        </form>
+
+        <div class="list__columns">
+          <div
+            class="column"
+            data-drop-zone="want-backlog"
+            aria-label="Want-to backlog"
+          >
+            <div class="column__header">
+              <h3>Want-to list</h3>
+              <span class="pill">Drag to working</span>
+            </div>
+            <div class="items" data-items="want-backlog"></div>
+          </div>
+          <div
+            class="column column--work"
+            data-drop-zone="want-working"
+            aria-label="Want-to working"
+          >
+            <div class="column__header">
+              <h3>Working area</h3>
+              <span class="pill pill--work">In focus</span>
+            </div>
+            <div class="items" data-items="want-working"></div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="app__footer">
+        <p>
+          Drag cards into a working area, switch status to waiting or done, and
+          add subtasks to stay aligned. Items with due dates float above those
+          without one.
+        </p>
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
