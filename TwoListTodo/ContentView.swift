@@ -371,7 +371,11 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if items.isEmpty {
-                    ContentUnavailableView("No active tasks", systemImage: "tray")
+                    if #available(iOS 17.0, *) {
+                        ContentUnavailableView("No active tasks", systemImage: "tray")
+                    } else {
+                        UnavailableContentView(title: "No active tasks", systemImage: "tray")
+                    }
                 }
                 ForEach($items) { $item in
                     WorkItemRow(item: $item, onComplete: onComplete)
@@ -407,7 +411,11 @@ private struct WorkAreaView: View {
 
             Section {
                 if graveyard.isEmpty {
-                    ContentUnavailableView("No completed tasks", systemImage: "archivebox")
+                    if #available(iOS 17.0, *) {
+                        ContentUnavailableView("No completed tasks", systemImage: "archivebox")
+                    } else {
+                        UnavailableContentView(title: "No completed tasks", systemImage: "archivebox")
+                    }
                 }
                 ForEach(graveyard) { item in
                     GraveyardRow(item: item, onRestore: { onRestore(item) })
@@ -434,6 +442,25 @@ private struct WorkAreaView: View {
                 .joined(separator: ", ")
             return "Weekly on \(days)"
         }
+    }
+}
+
+private struct UnavailableContentView: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .accessibilityElement(children: .combine)
     }
 }
 
