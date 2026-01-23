@@ -1,48 +1,44 @@
 # Two-List Todo (iPhone)
 
-A lightweight, mobile-first two-list todo app designed for iPhone-sized screens.
+This repository now contains a native iPhone app built with SwiftUI. It provides two simple lists—"Today" and "Later"—so you can keep your day focused while still capturing ideas for later.
 
-## Install on your iPhone (add to Home Screen)
+## Project structure
 
-The app is a static site, so you just need to host the files and open the URL
-on your iPhone. Once it loads in Safari, you can add it to your Home Screen.
+- `TwoListTodo.xcodeproj` — Xcode project file.
+- `TwoListTodo/` — SwiftUI source, assets, and Info.plist.
 
-### 1) Run the app locally
+## Build and install on your iPhone (Xcode on macOS)
 
-From this repo folder, start a simple local web server:
+### 1) Open the project
 
-```bash
-python3 -m http.server 8000
-```
+1. On your Mac, open **Xcode**.
+2. Choose **File → Open...** and select `TwoListTodo.xcodeproj` from this repo.
 
-> If you already use a different static server (Node, nginx, etc.), that works
-> too—just make sure it serves `index.html` from this directory.
+### 2) Configure signing
 
-### 2) Open the app on your iPhone
+1. In Xcode, select the **TwoListTodo** project in the left sidebar.
+2. Select the **TwoListTodo** target.
+3. Under **Signing & Capabilities**, choose your **Team** (your Apple ID).
+4. If asked, allow Xcode to manage signing automatically.
 
-1. Make sure your iPhone and your computer are on the **same Wi‑Fi network**.
-2. Find your computer's local IP address:
+> If you don’t have a paid Apple Developer account, you can still install to a device with a free Apple ID, but the app will need to be re-signed every 7 days.
 
-   - macOS: `System Settings → Network` (look for the IP address)
-   - Windows: `ipconfig` in Command Prompt (look for IPv4 Address)
-   - Linux: `ip a` (look for `inet` on your Wi‑Fi interface)
+### 3) Run on your iPhone
 
-3. On your iPhone, open Safari and go to:
+1. Connect your iPhone to your Mac with a USB-C/Lightning cable (or enable Wireless Debugging in Xcode if preferred).
+2. In Xcode’s toolbar, choose your iPhone as the run destination.
+3. Click **Run** (▶︎) to build and install.
 
-```
-http://<YOUR_COMPUTER_IP>:8000
-```
+### 4) Trust the developer profile (first-time only)
 
-### 3) Add to Home Screen
+On your iPhone:
 
-1. In Safari, tap the **Share** button.
-2. Scroll and tap **Add to Home Screen**.
-3. Name it (e.g., "Two-List Todo") and tap **Add**.
+1. Open **Settings → General → VPN & Device Management**.
+2. Tap the developer profile and choose **Trust**.
 
-The app will now launch full‑screen from your Home Screen like a native app.
+The app will now launch from your Home Screen.
 
-## Optional: Host it online
+## Notes
 
-If you want to install without being on the same Wi‑Fi, host the files on a
-static host (GitHub Pages, Netlify, Vercel, etc.) and visit that URL on your
-phone, then repeat the **Add to Home Screen** steps.
+- The deployment target is set to iOS 16.0.
+- You can customize the app name, icon, or bundle identifier in the Xcode project settings.
