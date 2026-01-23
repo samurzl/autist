@@ -1,20 +1,21 @@
+import Combine
 import SwiftUI
 import UserNotifications
 
-private enum WorkingStatus: String, CaseIterable, Identifiable {
+private enum WorkingStatus: String, CaseIterable, Identifiable, Codable {
     case active = "Active"
     case onHold = "On Hold"
 
     var id: String { rawValue }
 }
 
-private struct Subtask: Identifiable, Hashable {
+private struct Subtask: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
     var isDone = false
 }
 
-private struct TodoItem: Identifiable, Hashable {
+private struct TodoItem: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
     var priority: Int
@@ -24,12 +25,12 @@ private struct TodoItem: Identifiable, Hashable {
     var seriesID: UUID? = nil
 }
 
-private enum ListKind: String {
+private enum ListKind: String, Codable {
     case tasks
     case ideas
 }
 
-private enum AppTab: String, CaseIterable, Identifiable {
+private enum AppTab: String, CaseIterable, Identifiable, Codable {
     case tasksList = "Tasks List"
     case ideasList = "Ideas List"
     case tasksWork = "Tasks Work"
@@ -38,14 +39,14 @@ private enum AppTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private enum RecurrenceFrequency: String, CaseIterable, Identifiable {
+private enum RecurrenceFrequency: String, CaseIterable, Identifiable, Codable {
     case everyDays = "Every X Days"
     case weekly = "Weekly"
 
     var id: String { rawValue }
 }
 
-private enum Weekday: String, CaseIterable, Identifiable {
+private enum Weekday: String, CaseIterable, Identifiable, Codable {
     case sunday = "Sunday"
     case monday = "Monday"
     case tuesday = "Tuesday"
@@ -69,7 +70,7 @@ private enum Weekday: String, CaseIterable, Identifiable {
     }
 }
 
-private struct RecurringSeries: Identifiable, Hashable {
+private struct RecurringSeries: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
     var frequency: RecurrenceFrequency
@@ -78,17 +79,132 @@ private struct RecurringSeries: Identifiable, Hashable {
     var lastGeneratedDate: Date = Date()
 }
 
-struct ContentView: View {
-    @State private var selectedTab: AppTab = .tasksList
+private struct AppState: Codable {
+    var selectedTab: AppTab = .tasksList
+    var tasks: [TodoItem] = []
+    var ideas: [TodoItem] = []
+    var tasksWorking: [TodoItem] = []
+    var ideasWorking: [TodoItem] = []
+    var tasksGraveyard: [TodoItem] = []
+    var ideasGraveyard: [TodoItem] = []
+    var tasksSeries: [RecurringSeries] = []
+    var ideasSeries: [RecurringSeries] = []
+}
 
-    @State private var tasks: [TodoItem] = []
-    @State private var ideas: [TodoItem] = []
-    @State private var tasksWorking: [TodoItem] = []
-    @State private var ideasWorking: [TodoItem] = []
-    @State private var tasksGraveyard: [TodoItem] = []
-    @State private var ideasGraveyard: [TodoItem] = []
-    @State private var tasksSeries: [RecurringSeries] = []
-    @State private var ideasSeries: [RecurringSeries] = []
+private final class AppStatePersistence {
+    static let shared = AppStatePersistence()
+
+    private let iCloudKey = "TwoListTodoState"
+    private let localKey = "TwoListTodoStateLocal"
+    private let iCloudStore = NSUbiquitousKeyValueStore.default
+
+    func load() -> AppState? {
+        if let data = iCloudStore.data(forKey: iCloudKey),
+           let state = decode(from: data) {
+            return state
+        }
+
+        guard let data = UserDefaults.standard.data(forKey: localKey) else { return nil }
+        return decode(from: data)
+    }
+
+    func save(_ state: AppState) {
+        guard let data = encode(state) else { return }
+        UserDefaults.standard.set(data, forKey: localKey)
+        iCloudStore.set(data, forKey: iCloudKey)
+        iCloudStore.synchronize()
+    }
+
+    private func encode(_ state: AppState) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(state)
+    }
+
+    private func decode(from data: Data) -> AppState? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(AppState.self, from: data)
+    }
+}
+
+@MainActor
+private final class AppStateStore: ObservableObject {
+    @Published var selectedTab: AppTab = .tasksList
+    @Published var tasks: [TodoItem] = []
+    @Published var ideas: [TodoItem] = []
+    @Published var tasksWorking: [TodoItem] = []
+    @Published var ideasWorking: [TodoItem] = []
+    @Published var tasksGraveyard: [TodoItem] = []
+    @Published var ideasGraveyard: [TodoItem] = []
+    @Published var tasksSeries: [RecurringSeries] = []
+    @Published var ideasSeries: [RecurringSeries] = []
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        load()
+        observeICloudChanges()
+        autosaveChanges()
+    }
+
+    func snapshot() -> AppState {
+        AppState(
+            selectedTab: selectedTab,
+            tasks: tasks,
+            ideas: ideas,
+            tasksWorking: tasksWorking,
+            ideasWorking: ideasWorking,
+            tasksGraveyard: tasksGraveyard,
+            ideasGraveyard: ideasGraveyard,
+            tasksSeries: tasksSeries,
+            ideasSeries: ideasSeries
+        )
+    }
+
+    func apply(_ state: AppState) {
+        selectedTab = state.selectedTab
+        tasks = state.tasks
+        ideas = state.ideas
+        tasksWorking = state.tasksWorking
+        ideasWorking = state.ideasWorking
+        tasksGraveyard = state.tasksGraveyard
+        ideasGraveyard = state.ideasGraveyard
+        tasksSeries = state.tasksSeries
+        ideasSeries = state.ideasSeries
+    }
+
+    func save() {
+        AppStatePersistence.shared.save(snapshot())
+    }
+
+    private func load() {
+        guard let state = AppStatePersistence.shared.load() else { return }
+        apply(state)
+    }
+
+    private func observeICloudChanges() {
+        NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let state = AppStatePersistence.shared.load() else { return }
+                self?.apply(state)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func autosaveChanges() {
+        objectWillChange
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] in
+                self?.save()
+            }
+            .store(in: &cancellables)
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var store = AppStateStore()
 
     @State private var showingAddSheet = false
     @State private var addSheetKind: ListKind = .tasks
@@ -101,7 +217,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Picker("Tabs", selection: $selectedTab) {
+                Picker("Tabs", selection: $store.selectedTab) {
                     ForEach(AppTab.allCases) { tab in
                         Text(tab.rawValue).tag(tab)
                     }
@@ -110,11 +226,11 @@ struct ContentView: View {
                 .padding(.horizontal)
 
                 Group {
-                    switch selectedTab {
+                    switch store.selectedTab {
                     case .tasksList:
                         ItemsListView(
                             title: "Tasks",
-                            items: tasks,
+                            items: store.tasks,
                             onMoveToWork: { moveToWorkArea(item: $0, from: .tasks) },
                             onDelete: removeTasks,
                             onAddTapped: { openAddSheet(for: .tasks) }
@@ -122,7 +238,7 @@ struct ContentView: View {
                     case .ideasList:
                         ItemsListView(
                             title: "Ideas",
-                            items: ideas,
+                            items: store.ideas,
                             onMoveToWork: { moveToWorkArea(item: $0, from: .ideas) },
                             onDelete: removeIdeas,
                             onAddTapped: { openAddSheet(for: .ideas) }
@@ -130,9 +246,9 @@ struct ContentView: View {
                     case .tasksWork:
                         WorkAreaView(
                             title: "Tasks Work Area",
-                            items: $tasksWorking,
-                            graveyard: $tasksGraveyard,
-                            series: $tasksSeries,
+                            items: $store.tasksWorking,
+                            graveyard: $store.tasksGraveyard,
+                            series: $store.tasksSeries,
                             onComplete: { completeItem($0, in: .tasks) },
                             onMoveToBacklog: { moveToBacklog($0, from: .tasks) },
                             onRestore: { restoreItem($0, in: .tasks) },
@@ -141,9 +257,9 @@ struct ContentView: View {
                     case .ideasWork:
                         WorkAreaView(
                             title: "Ideas Work Area",
-                            items: $ideasWorking,
-                            graveyard: $ideasGraveyard,
-                            series: $ideasSeries,
+                            items: $store.ideasWorking,
+                            graveyard: $store.ideasGraveyard,
+                            series: $store.ideasSeries,
                             onComplete: { completeItem($0, in: .ideas) },
                             onMoveToBacklog: { moveToBacklog($0, from: .ideas) },
                             onRestore: { restoreItem($0, in: .ideas) },
@@ -189,20 +305,20 @@ struct ContentView: View {
     private func addItem(_ item: TodoItem, to kind: ListKind) {
         switch kind {
         case .tasks:
-            tasks.insert(item, at: 0)
+            store.tasks.insert(item, at: 0)
         case .ideas:
-            ideas.insert(item, at: 0)
+            store.ideas.insert(item, at: 0)
         }
     }
 
     private func addSeries(_ series: RecurringSeries, to kind: ListKind) {
         switch kind {
         case .tasks:
-            tasksSeries.append(series)
-            addSeriesItem(series, to: &tasksWorking)
+            store.tasksSeries.append(series)
+            addSeriesItem(series, to: &store.tasksWorking)
         case .ideas:
-            ideasSeries.append(series)
-            addSeriesItem(series, to: &ideasWorking)
+            store.ideasSeries.append(series)
+            addSeriesItem(series, to: &store.ideasWorking)
         }
     }
 
@@ -220,72 +336,72 @@ struct ContentView: View {
     }
 
     private func removeTasks(at offsets: IndexSet) {
-        tasks.remove(atOffsets: offsets)
+        store.tasks.remove(atOffsets: offsets)
     }
 
     private func removeIdeas(at offsets: IndexSet) {
-        ideas.remove(atOffsets: offsets)
+        store.ideas.remove(atOffsets: offsets)
     }
 
     private func moveToWorkArea(item: TodoItem, from kind: ListKind) {
         switch kind {
         case .tasks:
-            guard let index = tasks.firstIndex(where: { $0.id == item.id }) else { return }
-            var updated = tasks.remove(at: index)
+            guard let index = store.tasks.firstIndex(where: { $0.id == item.id }) else { return }
+            var updated = store.tasks.remove(at: index)
             updated.status = .active
-            tasksWorking.insert(updated, at: 0)
+            store.tasksWorking.insert(updated, at: 0)
         case .ideas:
-            guard let index = ideas.firstIndex(where: { $0.id == item.id }) else { return }
-            var updated = ideas.remove(at: index)
+            guard let index = store.ideas.firstIndex(where: { $0.id == item.id }) else { return }
+            var updated = store.ideas.remove(at: index)
             updated.status = .active
-            ideasWorking.insert(updated, at: 0)
+            store.ideasWorking.insert(updated, at: 0)
         }
     }
 
     private func moveToBacklog(_ item: TodoItem, from kind: ListKind) {
         switch kind {
         case .tasks:
-            tasksWorking.removeAll { $0.id == item.id }
+            store.tasksWorking.removeAll { $0.id == item.id }
             var updated = item
             updated.status = nil
-            tasks.insert(updated, at: 0)
+            store.tasks.insert(updated, at: 0)
         case .ideas:
-            ideasWorking.removeAll { $0.id == item.id }
+            store.ideasWorking.removeAll { $0.id == item.id }
             var updated = item
             updated.status = nil
-            ideas.insert(updated, at: 0)
+            store.ideas.insert(updated, at: 0)
         }
     }
 
     private func completeItem(_ item: TodoItem, in kind: ListKind) {
         switch kind {
         case .tasks:
-            tasksWorking.removeAll { $0.id == item.id }
-            tasksGraveyard.insert(item, at: 0)
+            store.tasksWorking.removeAll { $0.id == item.id }
+            store.tasksGraveyard.insert(item, at: 0)
         case .ideas:
-            ideasWorking.removeAll { $0.id == item.id }
-            ideasGraveyard.insert(item, at: 0)
+            store.ideasWorking.removeAll { $0.id == item.id }
+            store.ideasGraveyard.insert(item, at: 0)
         }
     }
 
     private func restoreItem(_ item: TodoItem, in kind: ListKind) {
         switch kind {
         case .tasks:
-            tasksGraveyard.removeAll { $0.id == item.id }
+            store.tasksGraveyard.removeAll { $0.id == item.id }
             var updated = item
             updated.status = .active
-            tasksWorking.insert(updated, at: 0)
+            store.tasksWorking.insert(updated, at: 0)
         case .ideas:
-            ideasGraveyard.removeAll { $0.id == item.id }
+            store.ideasGraveyard.removeAll { $0.id == item.id }
             var updated = item
             updated.status = .active
-            ideasWorking.insert(updated, at: 0)
+            store.ideasWorking.insert(updated, at: 0)
         }
     }
 
     private func processRecurringSeries() {
-        processRecurringSeries(for: &tasksSeries, workingItems: &tasksWorking, listKind: .tasks)
-        processRecurringSeries(for: &ideasSeries, workingItems: &ideasWorking, listKind: .ideas)
+        processRecurringSeries(for: &store.tasksSeries, workingItems: &store.tasksWorking, listKind: .tasks)
+        processRecurringSeries(for: &store.ideasSeries, workingItems: &store.ideasWorking, listKind: .ideas)
     }
 
     private func processRecurringSeries(
