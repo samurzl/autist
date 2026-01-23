@@ -134,6 +134,7 @@ struct ContentView: View {
                             graveyard: $tasksGraveyard,
                             series: $tasksSeries,
                             onComplete: { completeItem($0, in: .tasks) },
+                            onMoveToBacklog: { moveToBacklog($0, from: .tasks) },
                             onRestore: { restoreItem($0, in: .tasks) },
                             onAddSeriesTapped: { openSeriesSheet(for: .tasks) }
                         )
@@ -144,6 +145,7 @@ struct ContentView: View {
                             graveyard: $ideasGraveyard,
                             series: $ideasSeries,
                             onComplete: { completeItem($0, in: .ideas) },
+                            onMoveToBacklog: { moveToBacklog($0, from: .ideas) },
                             onRestore: { restoreItem($0, in: .ideas) },
                             onAddSeriesTapped: { openSeriesSheet(for: .ideas) }
                         )
@@ -237,6 +239,21 @@ struct ContentView: View {
             var updated = ideas.remove(at: index)
             updated.status = .active
             ideasWorking.insert(updated, at: 0)
+        }
+    }
+
+    private func moveToBacklog(_ item: TodoItem, from kind: ListKind) {
+        switch kind {
+        case .tasks:
+            tasksWorking.removeAll { $0.id == item.id }
+            var updated = item
+            updated.status = nil
+            tasks.insert(updated, at: 0)
+        case .ideas:
+            ideasWorking.removeAll { $0.id == item.id }
+            var updated = item
+            updated.status = nil
+            ideas.insert(updated, at: 0)
         }
     }
 
@@ -363,6 +380,7 @@ private struct WorkAreaView: View {
     @Binding var graveyard: [TodoItem]
     @Binding var series: [RecurringSeries]
     let onComplete: (TodoItem) -> Void
+    let onMoveToBacklog: (TodoItem) -> Void
     let onRestore: (TodoItem) -> Void
     let onAddSeriesTapped: () -> Void
 
@@ -379,7 +397,7 @@ private struct WorkAreaView: View {
                     }
                 }
                 ForEach($items) { $item in
-                    WorkItemRow(item: $item, onComplete: onComplete)
+                    WorkItemRow(item: $item, onComplete: onComplete, onMoveToBacklog: onMoveToBacklog)
                 }
             } header: {
                 Text(title)
@@ -577,9 +595,11 @@ private struct ListItemRow: View {
 private struct WorkItemRow: View {
     @Binding var item: TodoItem
     var onComplete: ((TodoItem) -> Void)? = nil
+    var onMoveToBacklog: ((TodoItem) -> Void)? = nil
 
     @State private var isExpanded = false
     @State private var subtaskDraft = ""
+    @State private var showDueDatePicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -631,12 +651,21 @@ private struct WorkItemRow: View {
             }
             .pickerStyle(.segmented)
 
-            Button {
-                onComplete?(item)
-            } label: {
-                Label("Complete", systemImage: "checkmark.circle")
+            HStack(spacing: 12) {
+                Button {
+                    onComplete?(item)
+                } label: {
+                    Label("Complete", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    onMoveToBacklog?(item)
+                } label: {
+                    Label("Backlog", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 12) {
@@ -650,8 +679,25 @@ private struct WorkItemRow: View {
                     Toggle("Has due date", isOn: dueDateToggle)
 
                     if item.dueDate != nil {
-                        DatePicker("Due", selection: dueDateBinding, displayedComponents: .date)
-                            .datePickerStyle(.compact)
+                        Button {
+                            showDueDatePicker = true
+                        } label: {
+                            HStack {
+                                Text("Due date")
+                                Spacer()
+                                Text(dueDateBinding.wrappedValue, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showDueDatePicker) {
+                            DatePicker("Due date", selection: dueDateBinding, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .onChange(of: dueDateBinding.wrappedValue) { _ in
+                                    showDueDatePicker = false
+                                }
+                                .padding()
+                        }
                     }
 
                     Divider()
@@ -661,7 +707,18 @@ private struct WorkItemRow: View {
                         .foregroundStyle(.secondary)
 
                     ForEach($item.subtasks) { $subtask in
-                        Toggle(subtask.title, isOn: $subtask.isDone)
+                        HStack {
+                            Toggle(subtask.title, isOn: $subtask.isDone)
+                            Spacer()
+                            Button {
+                                removeSubtask(subtask)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                            .accessibilityLabel("Remove subtask")
+                        }
                     }
 
                     HStack(spacing: 8) {
@@ -716,6 +773,10 @@ private struct WorkItemRow: View {
         item.subtasks.append(Subtask(title: trimmed))
         subtaskDraft = ""
     }
+
+    private func removeSubtask(_ subtask: Subtask) {
+        item.subtasks.removeAll { $0.id == subtask.id }
+    }
 }
 
 private struct GraveyardRow: View {
@@ -755,6 +816,7 @@ private struct AddItemSheet: View {
     @State private var priority = 3
     @State private var hasDueDate = false
     @State private var dueDate = Date()
+    @State private var showDueDatePicker = false
 
     var body: some View {
         NavigationStack {
@@ -764,7 +826,25 @@ private struct AddItemSheet: View {
                     Stepper("Priority \(priority)", value: $priority, in: 1...5)
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
-                        DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                        Button {
+                            showDueDatePicker = true
+                        } label: {
+                            HStack {
+                                Text("Due date")
+                                Spacer()
+                                Text(dueDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showDueDatePicker) {
+                            DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .onChange(of: dueDate) { _ in
+                                    showDueDatePicker = false
+                                }
+                                .padding()
+                        }
                     }
                 }
             }
