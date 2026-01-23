@@ -3,8 +3,7 @@ import UserNotifications
 
 private enum WorkingStatus: String, CaseIterable, Identifiable {
     case active = "Active"
-    case waiting = "Waiting"
-    case done = "Done"
+    case onHold = "On Hold"
 
     var id: String { rawValue }
 }
@@ -367,6 +366,8 @@ private struct WorkAreaView: View {
     let onRestore: (TodoItem) -> Void
     let onAddSeriesTapped: () -> Void
 
+    @State private var activeSheet: WorkAreaSheet? = nil
+
     var body: some View {
         List {
             Section {
@@ -383,8 +384,63 @@ private struct WorkAreaView: View {
             } header: {
                 Text(title)
             }
+        }
+        .listStyle(.insetGrouped)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        activeSheet = .recurringSeries
+                    } label: {
+                        Label("Recurring series", systemImage: "repeat")
+                    }
 
+                    Button {
+                        activeSheet = .graveyard
+                    } label: {
+                        Label("Graveyard", systemImage: "archivebox")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("Work area options")
+            }
+        }
+        .sheet(item: $activeSheet) { sheet in
+            NavigationStack {
+                switch sheet {
+                case .recurringSeries:
+                    recurringSeriesView
+                case .graveyard:
+                    graveyardView
+                }
+            }
+        }
+    }
+
+    private func seriesDescription(_ series: RecurringSeries) -> String {
+        switch series.frequency {
+        case .everyDays:
+            return "Every \(series.intervalDays) days"
+        case .weekly:
+            let days = Weekday.allCases.filter { series.weeklyDays.contains($0) }
+                .map { $0.rawValue }
+                .joined(separator: ", ")
+            return "Weekly on \(days)"
+        }
+    }
+
+    private var recurringSeriesView: some View {
+        List {
             Section {
+                if series.isEmpty {
+                    if #available(iOS 17.0, *) {
+                        ContentUnavailableView("No recurring series", systemImage: "repeat")
+                    } else {
+                        UnavailableContentView(title: "No recurring series", systemImage: "repeat")
+                    }
+                }
+
                 ForEach(series) { entry in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(entry.title)
@@ -399,16 +455,23 @@ private struct WorkAreaView: View {
                 }
 
                 Button {
-                    onAddSeriesTapped()
+                    activeSheet = nil
+                    DispatchQueue.main.async {
+                        onAddSeriesTapped()
+                    }
                 } label: {
                     Label("Add recurring series", systemImage: "repeat")
                 }
-            } header: {
-                Text("Recurring Series")
             } footer: {
                 Text("Recurring series generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
             }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Recurring Series")
+    }
 
+    private var graveyardView: some View {
+        List {
             Section {
                 if graveyard.isEmpty {
                     if #available(iOS 17.0, *) {
@@ -417,30 +480,32 @@ private struct WorkAreaView: View {
                         UnavailableContentView(title: "No completed tasks", systemImage: "archivebox")
                     }
                 }
+
                 ForEach(graveyard) { item in
                     GraveyardRow(item: item, onRestore: { onRestore(item) })
                 }
                 .onDelete { offsets in
                     graveyard.remove(atOffsets: offsets)
                 }
-            } header: {
-                Text("Task Graveyard")
             } footer: {
                 Text("Restore a task to put it back in the work area.")
             }
         }
         .listStyle(.insetGrouped)
+        .navigationTitle("Task Graveyard")
     }
+}
 
-    private func seriesDescription(_ series: RecurringSeries) -> String {
-        switch series.frequency {
-        case .everyDays:
-            return "Every \(series.intervalDays) days"
-        case .weekly:
-            let days = Weekday.allCases.filter { series.weeklyDays.contains($0) }
-                .map { $0.rawValue }
-                .joined(separator: ", ")
-            return "Weekly on \(days)"
+private enum WorkAreaSheet: Identifiable {
+    case recurringSeries
+    case graveyard
+
+    var id: String {
+        switch self {
+        case .recurringSeries:
+            return "recurringSeries"
+        case .graveyard:
+            return "graveyard"
         }
     }
 }
@@ -522,12 +587,13 @@ private struct WorkItemRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
                         .font(.headline)
+                        .foregroundStyle(item.status == .onHold ? .secondary : .primary)
 
                     HStack(spacing: 8) {
                         Label("P\(item.priority)", systemImage: "flag.fill")
                             .labelStyle(.titleAndIcon)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
 
                         if let dueDate = item.dueDate {
                             Label {
@@ -536,11 +602,11 @@ private struct WorkItemRow: View {
                                 Image(systemName: "calendar")
                             }
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
                         } else {
                             Text("No due date")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
                         }
                     }
                 }
@@ -612,6 +678,7 @@ private struct WorkItemRow: View {
             }
         }
         .padding(.vertical, 6)
+        .opacity(item.status == .onHold ? 0.6 : 1)
     }
 
     private var statusBinding: Binding<WorkingStatus> {
@@ -619,9 +686,6 @@ private struct WorkItemRow: View {
             get: { item.status ?? .active },
             set: { newValue in
                 item.status = newValue
-                if newValue == .done {
-                    onComplete?(item)
-                }
             }
         )
     }
