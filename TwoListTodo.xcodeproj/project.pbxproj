@@ -182,10 +182,10 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = TwoListTodo/Info.plist;
-				INFOPLIST_FILE[sdk=macosx*] = TwoListTodo/Info-macOS.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = TwoListTodo/Info-macOS.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = "$(inherited) @executable_path/../Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.twolisttodo";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -241,10 +241,10 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = TwoListTodo/Info.plist;
-				INFOPLIST_FILE[sdk=macosx*] = TwoListTodo/Info-macOS.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = TwoListTodo/Info-macOS.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = "$(inherited) @executable_path/../Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.twolisttodo";
 				PRODUCT_NAME = "$(TARGET_NAME)";
