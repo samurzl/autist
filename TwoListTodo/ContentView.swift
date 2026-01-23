@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 private enum WorkingStatus: String, CaseIterable, Identifiable {
     case active = "Active"
@@ -21,6 +22,7 @@ private struct TodoItem: Identifiable, Hashable {
     var dueDate: Date?
     var subtasks: [Subtask] = []
     var status: WorkingStatus? = nil
+    var seriesID: UUID? = nil
 }
 
 private enum ListKind: String {
@@ -28,148 +30,192 @@ private enum ListKind: String {
     case ideas
 }
 
+private enum AppTab: String, CaseIterable, Identifiable {
+    case tasksList = "Tasks List"
+    case ideasList = "Ideas List"
+    case tasksWork = "Tasks Work"
+    case ideasWork = "Ideas Work"
+
+    var id: String { rawValue }
+}
+
+private enum RecurrenceFrequency: String, CaseIterable, Identifiable {
+    case everyDays = "Every X Days"
+    case weekly = "Weekly"
+
+    var id: String { rawValue }
+}
+
+private enum Weekday: String, CaseIterable, Identifiable {
+    case sunday = "Sunday"
+    case monday = "Monday"
+    case tuesday = "Tuesday"
+    case wednesday = "Wednesday"
+    case thursday = "Thursday"
+    case friday = "Friday"
+    case saturday = "Saturday"
+
+    var id: String { rawValue }
+
+    var calendarValue: Int {
+        switch self {
+        case .sunday: return 1
+        case .monday: return 2
+        case .tuesday: return 3
+        case .wednesday: return 4
+        case .thursday: return 5
+        case .friday: return 6
+        case .saturday: return 7
+        }
+    }
+}
+
+private struct RecurringSeries: Identifiable, Hashable {
+    var id = UUID()
+    var title: String
+    var frequency: RecurrenceFrequency
+    var intervalDays: Int = 2
+    var weeklyDays: Set<Weekday> = []
+    var lastGeneratedDate: Date = Date()
+}
+
 struct ContentView: View {
+    @State private var selectedTab: AppTab = .tasksList
+
     @State private var tasks: [TodoItem] = []
     @State private var ideas: [TodoItem] = []
     @State private var tasksWorking: [TodoItem] = []
     @State private var ideasWorking: [TodoItem] = []
+    @State private var tasksGraveyard: [TodoItem] = []
+    @State private var ideasGraveyard: [TodoItem] = []
+    @State private var tasksSeries: [RecurringSeries] = []
+    @State private var ideasSeries: [RecurringSeries] = []
 
-    @State private var tasksDraft = ""
-    @State private var tasksPriority = 3
-    @State private var tasksHasDueDate = false
-    @State private var tasksDueDate = Date()
+    @State private var showingAddSheet = false
+    @State private var addSheetKind: ListKind = .tasks
 
-    @State private var ideasDraft = ""
-    @State private var ideasPriority = 3
-    @State private var ideasHasDueDate = false
-    @State private var ideasDueDate = Date()
+    @State private var showingSeriesSheet = false
+    @State private var seriesSheetKind: ListKind = .tasks
+
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    AddItemView(
-                        title: "Add a task",
-                        draft: $tasksDraft,
-                        priority: $tasksPriority,
-                        hasDueDate: $tasksHasDueDate,
-                        dueDate: $tasksDueDate,
-                        onAdd: addTask
-                    )
-
-                    ForEach(sortedItems(tasks)) { item in
-                        if let index = tasks.firstIndex(where: { $0.id == item.id }) {
-                            TodoItemRow(item: $tasks[index])
-                                .onDrag { dragPayload(for: item, kind: .tasks) }
-                        }
+            VStack(spacing: 16) {
+                Picker("Tabs", selection: $selectedTab) {
+                    ForEach(AppTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
                     }
-                    .onDelete(perform: removeTasks)
-                } header: {
-                    Text("Tasks")
-                } footer: {
-                    Text("Drag tasks into the working area to track their status.")
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
 
-                Section {
-                    dropZoneHeader(title: "Tasks Working Area")
-
-                    ForEach(sortedItems(tasksWorking)) { item in
-                        if let index = tasksWorking.firstIndex(where: { $0.id == item.id }) {
-                            TodoItemRow(item: $tasksWorking[index], showsStatus: true) { completed in
-                                removeCompleted(completed, from: .tasks)
-                            }
-                        }
+                Group {
+                    switch selectedTab {
+                    case .tasksList:
+                        ItemsListView(
+                            title: "Tasks",
+                            items: tasks,
+                            onMoveToWork: { moveToWorkArea(item: $0, from: .tasks) },
+                            onDelete: removeTasks,
+                            onAddTapped: { openAddSheet(for: .tasks) }
+                        )
+                    case .ideasList:
+                        ItemsListView(
+                            title: "Ideas",
+                            items: ideas,
+                            onMoveToWork: { moveToWorkArea(item: $0, from: .ideas) },
+                            onDelete: removeIdeas,
+                            onAddTapped: { openAddSheet(for: .ideas) }
+                        )
+                    case .tasksWork:
+                        WorkAreaView(
+                            title: "Tasks Work Area",
+                            items: $tasksWorking,
+                            graveyard: $tasksGraveyard,
+                            series: $tasksSeries,
+                            onComplete: { completeItem($0, in: .tasks) },
+                            onRestore: { restoreItem($0, in: .tasks) },
+                            onAddSeriesTapped: { openSeriesSheet(for: .tasks) }
+                        )
+                    case .ideasWork:
+                        WorkAreaView(
+                            title: "Ideas Work Area",
+                            items: $ideasWorking,
+                            graveyard: $ideasGraveyard,
+                            series: $ideasSeries,
+                            onComplete: { completeItem($0, in: .ideas) },
+                            onRestore: { restoreItem($0, in: .ideas) },
+                            onAddSeriesTapped: { openSeriesSheet(for: .ideas) }
+                        )
                     }
-                    .onDelete(perform: removeTasksWorking)
-                }
-                .onDrop(of: [.text], isTargeted: nil) { providers in
-                    handleDrop(providers, target: .tasks)
-                }
-
-                Section {
-                    AddItemView(
-                        title: "Add an idea",
-                        draft: $ideasDraft,
-                        priority: $ideasPriority,
-                        hasDueDate: $ideasHasDueDate,
-                        dueDate: $ideasDueDate,
-                        onAdd: addIdea
-                    )
-
-                    ForEach(sortedItems(ideas)) { item in
-                        if let index = ideas.firstIndex(where: { $0.id == item.id }) {
-                            TodoItemRow(item: $ideas[index])
-                                .onDrag { dragPayload(for: item, kind: .ideas) }
-                        }
-                    }
-                    .onDelete(perform: removeIdeas)
-                } header: {
-                    Text("Ideas")
-                } footer: {
-                    Text("Ideas can be prioritized too, especially if they have due dates.")
-                }
-
-                Section {
-                    dropZoneHeader(title: "Ideas Working Area")
-
-                    ForEach(sortedItems(ideasWorking)) { item in
-                        if let index = ideasWorking.firstIndex(where: { $0.id == item.id }) {
-                            TodoItemRow(item: $ideasWorking[index], showsStatus: true) { completed in
-                                removeCompleted(completed, from: .ideas)
-                            }
-                        }
-                    }
-                    .onDelete(perform: removeIdeasWorking)
-                }
-                .onDrop(of: [.text], isTargeted: nil) { providers in
-                    handleDrop(providers, target: .ideas)
                 }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Two-List Todo")
-            .toolbar {
-                EditButton()
+            .sheet(isPresented: $showingAddSheet) {
+                AddItemSheet(kind: addSheetKind) { item in
+                    addItem(item, to: addSheetKind)
+                }
+            }
+            .sheet(isPresented: $showingSeriesSheet) {
+                AddSeriesSheet { series in
+                    addSeries(series, to: seriesSheetKind)
+                }
+            }
+            .onAppear {
+                NotificationManager.shared.requestAuthorization()
+                NotificationManager.shared.scheduleDailyReminders()
+                processRecurringSeries()
+            }
+            .onChange(of: scenePhase) { newValue in
+                if newValue == .active {
+                    processRecurringSeries()
+                }
             }
         }
     }
 
-    private func sortedItems(_ items: [TodoItem]) -> [TodoItem] {
-        items.sorted { lhs, rhs in
-            let lhsHasDueDate = lhs.dueDate != nil
-            let rhsHasDueDate = rhs.dueDate != nil
+    private func openAddSheet(for kind: ListKind) {
+        addSheetKind = kind
+        showingAddSheet = true
+    }
 
-            if lhsHasDueDate != rhsHasDueDate {
-                return lhsHasDueDate && !rhsHasDueDate
-            }
+    private func openSeriesSheet(for kind: ListKind) {
+        seriesSheetKind = kind
+        showingSeriesSheet = true
+    }
 
-            if lhs.priority != rhs.priority {
-                return lhs.priority > rhs.priority
-            }
-
-            if let lhsDate = lhs.dueDate, let rhsDate = rhs.dueDate, lhsDate != rhsDate {
-                return lhsDate < rhsDate
-            }
-
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+    private func addItem(_ item: TodoItem, to kind: ListKind) {
+        switch kind {
+        case .tasks:
+            tasks.insert(item, at: 0)
+        case .ideas:
+            ideas.insert(item, at: 0)
         }
     }
 
-    private func addTask() {
-        let trimmed = tasksDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let dueDate = tasksHasDueDate ? tasksDueDate : nil
-        tasks.insert(TodoItem(title: trimmed, priority: tasksPriority, dueDate: dueDate), at: 0)
-        tasksDraft = ""
-        tasksHasDueDate = false
+    private func addSeries(_ series: RecurringSeries, to kind: ListKind) {
+        switch kind {
+        case .tasks:
+            tasksSeries.append(series)
+            addSeriesItem(series, to: &tasksWorking)
+        case .ideas:
+            ideasSeries.append(series)
+            addSeriesItem(series, to: &ideasWorking)
+        }
     }
 
-    private func addIdea() {
-        let trimmed = ideasDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let dueDate = ideasHasDueDate ? ideasDueDate : nil
-        ideas.insert(TodoItem(title: trimmed, priority: ideasPriority, dueDate: dueDate), at: 0)
-        ideasDraft = ""
-        ideasHasDueDate = false
+    private func addSeriesItem(_ series: RecurringSeries, to items: inout [TodoItem]) {
+        if items.contains(where: { $0.seriesID == series.id }) { return }
+        let newItem = TodoItem(
+            title: series.title,
+            priority: 3,
+            dueDate: nil,
+            subtasks: [],
+            status: .active,
+            seriesID: series.id
+        )
+        items.insert(newItem, at: 0)
     }
 
     private func removeTasks(at offsets: IndexSet) {
@@ -180,116 +226,260 @@ struct ContentView: View {
         ideas.remove(atOffsets: offsets)
     }
 
-    private func removeTasksWorking(at offsets: IndexSet) {
-        tasksWorking.remove(atOffsets: offsets)
-    }
-
-    private func removeIdeasWorking(at offsets: IndexSet) {
-        ideasWorking.remove(atOffsets: offsets)
-    }
-
-    private func dragPayload(for item: TodoItem, kind: ListKind) -> NSItemProvider {
-        NSItemProvider(object: "\(kind.rawValue):\(item.id.uuidString)" as NSString)
-    }
-
-    private func handleDrop(_ providers: [NSItemProvider], target: ListKind) -> Bool {
-        for provider in providers {
-            if provider.canLoadObject(ofClass: NSString.self) {
-                _ = provider.loadObject(ofClass: NSString.self) { object, _ in
-                    guard let payload = object as? String else { return }
-                    DispatchQueue.main.async {
-                        moveItem(with: payload, to: target)
-                    }
-                }
-                return true
-            }
-        }
-        return false
-    }
-
-    private func moveItem(with payload: String, to target: ListKind) {
-        let parts = payload.split(separator: ":")
-        guard parts.count == 2, let sourceKind = ListKind(rawValue: String(parts[0])) else { return }
-        guard sourceKind == target else { return }
-        let idString = String(parts[1])
-        guard let itemID = UUID(uuidString: idString) else { return }
-
-        switch target {
+    private func moveToWorkArea(item: TodoItem, from kind: ListKind) {
+        switch kind {
         case .tasks:
-            if let index = tasks.firstIndex(where: { $0.id == itemID }) {
-                var item = tasks.remove(at: index)
-                item.status = .active
-                tasksWorking.append(item)
-            }
+            guard let index = tasks.firstIndex(where: { $0.id == item.id }) else { return }
+            var updated = tasks.remove(at: index)
+            updated.status = .active
+            tasksWorking.insert(updated, at: 0)
         case .ideas:
-            if let index = ideas.firstIndex(where: { $0.id == itemID }) {
-                var item = ideas.remove(at: index)
-                item.status = .active
-                ideasWorking.append(item)
-            }
+            guard let index = ideas.firstIndex(where: { $0.id == item.id }) else { return }
+            var updated = ideas.remove(at: index)
+            updated.status = .active
+            ideasWorking.insert(updated, at: 0)
         }
     }
 
-    private func removeCompleted(_ item: TodoItem, from kind: ListKind) {
+    private func completeItem(_ item: TodoItem, in kind: ListKind) {
         switch kind {
         case .tasks:
             tasksWorking.removeAll { $0.id == item.id }
+            tasksGraveyard.insert(item, at: 0)
         case .ideas:
             ideasWorking.removeAll { $0.id == item.id }
+            ideasGraveyard.insert(item, at: 0)
         }
     }
 
-    private func dropZoneHeader(title: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-            Spacer()
-            Label("Drop Here", systemImage: "tray.and.arrow.down")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.secondary)
+    private func restoreItem(_ item: TodoItem, in kind: ListKind) {
+        switch kind {
+        case .tasks:
+            tasksGraveyard.removeAll { $0.id == item.id }
+            var updated = item
+            updated.status = .active
+            tasksWorking.insert(updated, at: 0)
+        case .ideas:
+            ideasGraveyard.removeAll { $0.id == item.id }
+            var updated = item
+            updated.status = .active
+            ideasWorking.insert(updated, at: 0)
+        }
+    }
+
+    private func processRecurringSeries() {
+        processRecurringSeries(for: &tasksSeries, workingItems: &tasksWorking, listKind: .tasks)
+        processRecurringSeries(for: &ideasSeries, workingItems: &ideasWorking, listKind: .ideas)
+    }
+
+    private func processRecurringSeries(
+        for seriesList: inout [RecurringSeries],
+        workingItems: inout [TodoItem],
+        listKind: ListKind
+    ) {
+        let now = Date()
+        let calendar = Calendar.current
+        for index in seriesList.indices {
+            let series = seriesList[index]
+            guard let nextDate = nextOccurrence(for: series, calendar: calendar) else { continue }
+            if calendar.startOfDay(for: nextDate) <= calendar.startOfDay(for: now) {
+                if workingItems.contains(where: { $0.seriesID == series.id }) {
+                    NotificationManager.shared.sendSeriesPendingReminder(
+                        title: series.title,
+                        listKind: listKind,
+                        seriesID: series.id
+                    )
+                } else {
+                    addSeriesItem(series, to: &workingItems)
+                    seriesList[index].lastGeneratedDate = now
+                }
+            }
+        }
+    }
+
+    private func nextOccurrence(for series: RecurringSeries, calendar: Calendar) -> Date? {
+        switch series.frequency {
+        case .everyDays:
+            let interval = max(series.intervalDays, 1)
+            return calendar.date(byAdding: .day, value: interval, to: calendar.startOfDay(for: series.lastGeneratedDate))
+        case .weekly:
+            guard !series.weeklyDays.isEmpty else { return nil }
+            let start = calendar.startOfDay(for: series.lastGeneratedDate)
+            var nextDate: Date? = nil
+            for offset in 1...7 {
+                guard let candidate = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+                let weekday = calendar.component(.weekday, from: candidate)
+                if series.weeklyDays.contains(where: { $0.calendarValue == weekday }) {
+                    nextDate = candidate
+                    break
+                }
+            }
+            return nextDate
         }
     }
 }
 
-private struct AddItemView: View {
+private struct ItemsListView: View {
     let title: String
-    @Binding var draft: String
-    @Binding var priority: Int
-    @Binding var hasDueDate: Bool
-    @Binding var dueDate: Date
-    let onAdd: () -> Void
+    let items: [TodoItem]
+    let onMoveToWork: (TodoItem) -> Void
+    let onDelete: (IndexSet) -> Void
+    let onAddTapped: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                TextField(title, text: $draft)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .onSubmit(onAdd)
-
-                Button("Add") {
-                    onAdd()
+        ZStack(alignment: .bottomTrailing) {
+            List {
+                Section(header: Text(title)) {
+                    ForEach(items) { item in
+                        ListItemRow(item: item, onMoveToWork: { onMoveToWork(item) })
+                    }
+                    .onDelete(perform: onDelete)
+                } footer: {
+                    Text("Tap the left button to move an item into the work area.")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .listStyle(.insetGrouped)
+
+            Button {
+                onAddTapped()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding()
+                    .background(Circle().fill(Color.accentColor))
+                    .shadow(radius: 4)
+            }
+            .accessibilityLabel("Add \(title)")
+            .padding()
+        }
+    }
+}
+
+private struct WorkAreaView: View {
+    let title: String
+    @Binding var items: [TodoItem]
+    @Binding var graveyard: [TodoItem]
+    @Binding var series: [RecurringSeries]
+    let onComplete: (TodoItem) -> Void
+    let onRestore: (TodoItem) -> Void
+    let onAddSeriesTapped: () -> Void
+
+    var body: some View {
+        List {
+            Section(header: Text(title)) {
+                if items.isEmpty {
+                    ContentUnavailableView("No active tasks", systemImage: "tray")
+                }
+                ForEach($items) { $item in
+                    WorkItemRow(item: $item, onComplete: { onComplete(item) })
+                }
             }
 
-            HStack(spacing: 16) {
-                Stepper("Priority \(priority)", value: $priority, in: 1...5)
-                Toggle("Due date", isOn: $hasDueDate)
+            Section {
+                ForEach(series) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(entry.title)
+                            .font(.headline)
+                        Text(seriesDescription(entry))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onDelete { offsets in
+                    series.remove(atOffsets: offsets)
+                }
+
+                Button {
+                    onAddSeriesTapped()
+                } label: {
+                    Label("Add recurring series", systemImage: "repeat")
+                }
+            } header: {
+                Text("Recurring Series")
+            } footer: {
+                Text("Recurring series generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
             }
 
-            if hasDueDate {
-                DatePicker("", selection: $dueDate, displayedComponents: .date)
-                    .datePickerStyle(.compact)
+            Section {
+                if graveyard.isEmpty {
+                    ContentUnavailableView("No completed tasks", systemImage: "archivebox")
+                }
+                ForEach(graveyard) { item in
+                    GraveyardRow(item: item, onRestore: { onRestore(item) })
+                }
+                .onDelete { offsets in
+                    graveyard.remove(atOffsets: offsets)
+                }
+            } header: {
+                Text("Task Graveyard")
+            } footer: {
+                Text("Restore a task to put it back in the work area.")
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func seriesDescription(_ series: RecurringSeries) -> String {
+        switch series.frequency {
+        case .everyDays:
+            return "Every \(series.intervalDays) days"
+        case .weekly:
+            let days = Weekday.allCases.filter { series.weeklyDays.contains($0) }
+                .map { $0.rawValue }
+                .joined(separator: ", ")
+            return "Weekly on \(days)"
+        }
+    }
+}
+
+private struct ListItemRow: View {
+    let item: TodoItem
+    let onMoveToWork: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                onMoveToWork()
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.accent)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.title)
+                    .font(.headline)
+
+                HStack(spacing: 8) {
+                    Label("P\(item.priority)", systemImage: "flag.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let dueDate = item.dueDate {
+                        Label {
+                            Text(dueDate, style: .date)
+                        } icon: {
+                            Image(systemName: "calendar")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Text("No due date")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
     }
 }
 
-private struct TodoItemRow: View {
+private struct WorkItemRow: View {
     @Binding var item: TodoItem
-    var showsStatus: Bool = false
     var onComplete: ((TodoItem) -> Void)? = nil
 
     @State private var isExpanded = false
@@ -337,14 +527,19 @@ private struct TodoItemRow: View {
                 .buttonStyle(.plain)
             }
 
-            if showsStatus {
-                Picker("Status", selection: statusBinding) {
-                    ForEach(WorkingStatus.allCases) { status in
-                        Text(status.rawValue).tag(status)
-                    }
+            Picker("Status", selection: statusBinding) {
+                ForEach(WorkingStatus.allCases) { status in
+                    Text(status.rawValue).tag(status)
                 }
-                .pickerStyle(.segmented)
             }
+            .pickerStyle(.segmented)
+
+            Button {
+                onComplete?(item)
+            } label: {
+                Label("Complete", systemImage: "checkmark.circle")
+            }
+            .buttonStyle(.borderedProminent)
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 12) {
@@ -425,6 +620,203 @@ private struct TodoItemRow: View {
         guard !trimmed.isEmpty else { return }
         item.subtasks.append(Subtask(title: trimmed))
         subtaskDraft = ""
+    }
+}
+
+private struct GraveyardRow: View {
+    let item: TodoItem
+    let onRestore: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.headline)
+                Text("Completed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                onRestore()
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AddItemSheet: View {
+    let kind: ListKind
+    let onAdd: (TodoItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var priority = 3
+    @State private var hasDueDate = false
+    @State private var dueDate = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Title", text: $title)
+                    Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has due date", isOn: $hasDueDate)
+                    if hasDueDate {
+                        DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                    }
+                }
+            }
+            .navigationTitle(kind == .tasks ? "Add Task" : "Add Idea")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        let item = TodoItem(title: trimmed, priority: priority, dueDate: hasDueDate ? dueDate : nil)
+                        onAdd(item)
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AddSeriesSheet: View {
+    let onAdd: (RecurringSeries) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var frequency: RecurrenceFrequency = .everyDays
+    @State private var intervalDays = 2
+    @State private var weeklyDays: Set<Weekday> = [.monday]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Series") {
+                    TextField("Title", text: $title)
+                    Picker("Frequency", selection: $frequency) {
+                        ForEach(RecurrenceFrequency.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                }
+
+                if frequency == .everyDays {
+                    Section("Every X days") {
+                        Stepper("Every \(intervalDays) days", value: $intervalDays, in: 1...30)
+                    }
+                } else {
+                    Section("Weekly on") {
+                        ForEach(Weekday.allCases) { day in
+                            Toggle(day.rawValue, isOn: Binding(
+                                get: { weeklyDays.contains(day) },
+                                set: { isOn in
+                                    if isOn {
+                                        weeklyDays.insert(day)
+                                    } else {
+                                        weeklyDays.remove(day)
+                                    }
+                                }
+                            ))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Recurring Series")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        var series = RecurringSeries(title: trimmed, frequency: frequency)
+                        if frequency == .everyDays {
+                            series.intervalDays = intervalDays
+                        } else {
+                            series.weeklyDays = weeklyDays
+                        }
+                        series.lastGeneratedDate = Date()
+                        onAdd(series)
+                        dismiss()
+                    }
+                    .disabled(isAddDisabled)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var isAddDisabled: Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return true
+        }
+        if frequency == .weekly {
+            return weeklyDays.isEmpty
+        }
+        return false
+    }
+}
+
+private final class NotificationManager {
+    static let shared = NotificationManager()
+
+    private let center = UNUserNotificationCenter.current()
+
+    func requestAuthorization() {
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    func scheduleDailyReminders() {
+        let reminders = [(hour: 6, minute: 0, identifier: "morning-reminder"),
+                         (hour: 21, minute: 0, identifier: "evening-reminder")]
+
+        center.removePendingNotificationRequests(withIdentifiers: reminders.map { $0.identifier })
+
+        for reminder in reminders {
+            var dateComponents = DateComponents()
+            dateComponents.hour = reminder.hour
+            dateComponents.minute = reminder.minute
+
+            let content = UNMutableNotificationContent()
+            content.title = "Check your work areas"
+            content.body = "Review the tasks and ideas in your work areas to make sure they fit today."
+            content.sound = .default
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+            let request = UNNotificationRequest(identifier: reminder.identifier, content: content, trigger: trigger)
+            center.add(request)
+        }
+    }
+
+    func sendSeriesPendingReminder(title: String, listKind: ListKind, seriesID: UUID) {
+        let content = UNMutableNotificationContent()
+        content.title = "Recurring task still active"
+        content.body = "\(title) is still in your \(listKind == .tasks ? "tasks" : "ideas") work area. Complete it before the next scheduled entry."
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: "series-pending-\(seriesID.uuidString)", content: content, trigger: trigger)
+        center.add(request)
     }
 }
 

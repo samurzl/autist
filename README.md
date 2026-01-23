@@ -1,6 +1,35 @@
 # Two-List Todo (iPhone)
 
-This repository now contains a native iPhone app built with SwiftUI. It provides two simple lists—"Today" and "Later"—so you can keep your day focused while still capturing ideas for later.
+This repository contains a native iPhone app built with SwiftUI. It provides two list inboxes (Tasks and Ideas) and two work areas so you can intentionally choose what you are focusing on today.
+
+## What the app does
+
+### Tabs (top segmented control)
+- **Tasks List** and **Ideas List** show *all* items in each list.
+- **Tasks Work** and **Ideas Work** are dedicated areas for the items you are actively working on.
+
+### Lists
+- Each list is a simple catalog of all items.
+- A floating **Add** button in the bottom-right opens a dialog to set the item title, priority, and optional due date.
+- Each list item has a left-hand button that sends it to the matching work area.
+
+### Work areas
+- Items in a work area have a **status picker** (Active / Waiting / Done) and a **Complete** button.
+- Completing a task sends it to the **Task Graveyard** (inside the same work area tab).
+- The Task Graveyard lets you restore a completed item back to the active work area.
+
+### Recurring tasks
+- In each work area you can add **recurring series** (e.g., “every 2 days” or “weekly on Monday”).
+- When a series becomes due, the app adds a task to the work area.
+- If the previous instance from the same series is still active, the app skips the duplicate and sends a reminder notification instead.
+
+### Push notifications
+- Two daily reminders are scheduled:
+  - **6:00 AM** (morning)
+  - **9:00 PM** (evening)
+- These notifications remind you to review whether the work-area items are correct for the day ahead.
+
+> **Note:** Notifications require user permission the first time the app launches.
 
 ## Project structure
 
