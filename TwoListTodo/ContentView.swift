@@ -329,11 +329,13 @@ private struct ItemsListView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List {
-                Section(header: Text(title)) {
+                Section {
                     ForEach(items) { item in
                         ListItemRow(item: item, onMoveToWork: { onMoveToWork(item) })
                     }
                     .onDelete(perform: onDelete)
+                } header: {
+                    Text(title)
                 } footer: {
                     Text("Tap the left button to move an item into the work area.")
                 }
@@ -367,13 +369,15 @@ private struct WorkAreaView: View {
 
     var body: some View {
         List {
-            Section(header: Text(title)) {
+            Section {
                 if items.isEmpty {
                     ContentUnavailableView("No active tasks", systemImage: "tray")
                 }
                 ForEach($items) { $item in
-                    WorkItemRow(item: $item, onComplete: { onComplete(item) })
+                    WorkItemRow(item: $item, onComplete: onComplete)
                 }
+            } header: {
+                Text(title)
             }
 
             Section {
@@ -446,7 +450,7 @@ private struct ListItemRow: View {
                     .font(.title2)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.accent)
+            .foregroundStyle(Color.accentColor)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.title)
