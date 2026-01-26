@@ -525,14 +525,11 @@ private struct ItemsListView: View {
                 Section {
                     ForEach(items) { item in
                         ListItemRow(item: item)
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
+                            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
+                                if value.translation.width > 120, abs(value.translation.width) > abs(value.translation.height) {
                                     onMoveToWork(item)
-                                } label: {
-                                    Label("Work Area", systemImage: "arrow.right.circle.fill")
                                 }
-                                .tint(.accentColor)
-                            }
+                            })
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
                                     onEdit(item)
@@ -632,11 +629,6 @@ private struct WorkAreaView: View {
                 }
             }
         }
-        .sheet(item: $editingSeries) { series in
-            EditSeriesSheet(series: series) { updated in
-                updateSeries(updated)
-            }
-        }
     }
 
     private func seriesDescription(_ series: RecurringSeries) -> String {
@@ -690,6 +682,12 @@ private struct WorkAreaView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         .tint(.blue)
+
+                        Button(role: .destructive) {
+                            removeSeries(entry)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
                 }
                 .onDelete { offsets in
@@ -710,6 +708,11 @@ private struct WorkAreaView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Recurring Series")
+        .navigationDestination(item: $editingSeries) { entry in
+            EditSeriesSheet(series: entry) { updated in
+                updateSeries(updated)
+            }
+        }
     }
 
     private var graveyardView: some View {
@@ -748,6 +751,11 @@ private struct WorkAreaView: View {
             guard let seriesID = item.seriesID else { return false }
             return ids.contains(seriesID)
         }
+    }
+
+    private func removeSeries(_ entry: RecurringSeries) {
+        guard let index = series.firstIndex(where: { $0.id == entry.id }) else { return }
+        removeSeries(at: IndexSet(integer: index))
     }
 
     private func updateSeries(_ updated: RecurringSeries) {
@@ -840,6 +848,7 @@ private struct ListItemRow: View {
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 
