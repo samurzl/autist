@@ -579,7 +579,7 @@ private struct WorkAreaView: View {
     let onAddSeriesTapped: () -> Void
 
     @State private var activeSheet: WorkAreaSheet? = nil
-    @State private var editingSeries: RecurringSeries? = nil
+    @State private var editingSeriesID: UUID? = nil
 
     var body: some View {
         List {
@@ -665,19 +665,27 @@ private struct WorkAreaView: View {
                 }
 
                 ForEach(series) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.title)
-                            .font(.headline)
-                        Text(seriesDescription(entry))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(seriesMeta(entry))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    NavigationLink(
+                        destination: EditSeriesSheet(series: entry) { updated in
+                            updateSeries(updated)
+                        },
+                        tag: entry.id,
+                        selection: $editingSeriesID
+                    ) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.title)
+                                .font(.headline)
+                            Text(seriesDescription(entry))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(seriesMeta(entry))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
-                            editingSeries = entry
+                            editingSeriesID = entry.id
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
