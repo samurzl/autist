@@ -94,32 +94,16 @@ private struct AppState: Codable {
 private final class AppStatePersistence {
     static let shared = AppStatePersistence()
 
-    private let iCloudKey = "TwoListTodoState"
     private let localKey = "TwoListTodoStateLocal"
-    private let iCloudStore = NSUbiquitousKeyValueStore.default
 
     func load() -> AppState? {
-        iCloudStore.synchronize()
-        if let data = iCloudStore.data(forKey: iCloudKey),
-           let state = decode(from: data) {
-            return state
-        }
-
         guard let data = UserDefaults.standard.data(forKey: localKey) else { return nil }
-        return decode(from: data)
-    }
-
-    func loadFromICloud() -> AppState? {
-        iCloudStore.synchronize()
-        guard let data = iCloudStore.data(forKey: iCloudKey) else { return nil }
         return decode(from: data)
     }
 
     func save(_ state: AppState) {
         guard let data = encode(state) else { return }
         UserDefaults.standard.set(data, forKey: localKey)
-        iCloudStore.set(data, forKey: iCloudKey)
-        iCloudStore.synchronize()
     }
 
     private func encode(_ state: AppState) -> Data? {
@@ -151,7 +135,6 @@ private final class AppStateStore: ObservableObject {
 
     init() {
         load()
-        observeICloudChanges()
         autosaveChanges()
     }
 
@@ -187,21 +170,6 @@ private final class AppStateStore: ObservableObject {
 
     private func load() {
         guard let state = AppStatePersistence.shared.load() else { return }
-        apply(state)
-    }
-
-    private func observeICloudChanges() {
-        NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let state = AppStatePersistence.shared.loadFromICloud() else { return }
-                self?.apply(state)
-            }
-            .store(in: &cancellables)
-    }
-
-    func refreshFromICloud() {
-        guard let state = AppStatePersistence.shared.loadFromICloud() else { return }
         apply(state)
     }
 
@@ -298,7 +266,6 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { newValue in
                 if newValue == .active {
-                    store.refreshFromICloud()
                     processRecurringSeries()
                 }
             }
@@ -485,11 +452,7 @@ private struct ItemsListView: View {
                     Text("Tap the left button to move an item into the work area.")
                 }
             }
-#if os(macOS)
-            .listStyle(.inset)
-#else
             .listStyle(.insetGrouped)
-#endif
 
             Button {
                 onAddTapped()
@@ -524,7 +487,7 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if items.isEmpty {
-                    if #available(iOS 17.0, macOS 14.0, *) {
+                    if #available(iOS 17.0, *) {
                         ContentUnavailableView("No active tasks", systemImage: "tray")
                     } else {
                         UnavailableContentView(title: "No active tasks", systemImage: "tray")
@@ -537,13 +500,9 @@ private struct WorkAreaView: View {
                 Text(title)
             }
         }
-#if os(macOS)
-        .listStyle(.inset)
-#else
         .listStyle(.insetGrouped)
-#endif
         .toolbar {
-            ToolbarItem(placement: toolbarPlacement) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
                         activeSheet = .recurringSeries
@@ -591,19 +550,11 @@ private struct WorkAreaView: View {
         }
     }
 
-    private var toolbarPlacement: ToolbarItemPlacement {
-#if os(macOS)
-        return .automatic
-#else
-        return .topBarTrailing
-#endif
-    }
-
     private var recurringSeriesView: some View {
         List {
             Section {
                 if series.isEmpty {
-                    if #available(iOS 17.0, macOS 14.0, *) {
+                    if #available(iOS 17.0, *) {
                         ContentUnavailableView("No recurring series", systemImage: "repeat")
                     } else {
                         UnavailableContentView(title: "No recurring series", systemImage: "repeat")
@@ -643,11 +594,7 @@ private struct WorkAreaView: View {
                 Text("Recurring series generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
             }
         }
-#if os(macOS)
-        .listStyle(.inset)
-#else
         .listStyle(.insetGrouped)
-#endif
         .navigationTitle("Recurring Series")
     }
 
@@ -655,7 +602,7 @@ private struct WorkAreaView: View {
         List {
             Section {
                 if graveyard.isEmpty {
-                    if #available(iOS 17.0, macOS 14.0, *) {
+                    if #available(iOS 17.0, *) {
                         ContentUnavailableView("No completed tasks", systemImage: "archivebox")
                     } else {
                         UnavailableContentView(title: "No completed tasks", systemImage: "archivebox")
@@ -672,11 +619,7 @@ private struct WorkAreaView: View {
                 Text("Restore a task to put it back in the work area.")
             }
         }
-#if os(macOS)
-        .listStyle(.inset)
-#else
         .listStyle(.insetGrouped)
-#endif
         .navigationTitle("Task Graveyard")
     }
 
