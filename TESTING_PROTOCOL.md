@@ -1,17 +1,14 @@
 # Two-List Todo Testing Protocol
 
-This protocol covers comprehensive manual and build verification for both app targets:
-- **iOS (iPhone)**
-- **macOS (native or Catalyst)**
+This protocol covers comprehensive manual and build verification for the iOS (iPhone) target.
 
-It focuses on the functional flows implemented in the SwiftUI codebase (lists, work areas, subtasks, recurring series, notifications, and persistence). Run the iOS section on a simulator or device, and the macOS section on a Mac.
+It focuses on the functional flows implemented in the SwiftUI codebase (lists, work areas, subtasks, recurring series, notifications, and persistence). Run the iOS section on a simulator or device.
 
 ## 1. Preconditions & setup
 
 ### Required tools
 - **Xcode** (latest stable recommended).
 - An **iPhone simulator** or physical device for iOS testing.
-- A **Mac** run destination for macOS testing.
 
 ### Suggested test data
 Prepare a short set of labels you can reuse:
@@ -28,13 +25,7 @@ Prepare a short set of labels you can reuse:
 
 **Expected**: App launches to the main view with the segmented tabs for **Tasks List**, **Ideas List**, **Tasks Work**, **Ideas Work**.
 
-### macOS build
-1. In Xcode, choose **My Mac** (native) or **Mac Catalyst**.
-2. Build and run.
-
-**Expected**: App launches to the same main view, optimized for macOS list style.
-
-## 3. Smoke tests (both platforms)
+## 3. Smoke tests
 
 ### 3.1 Tab navigation
 1. Tap each segmented tab.
@@ -68,7 +59,7 @@ Repeat in **Ideas List**.
 **Expected**: No new item is created.
 
 ### 4.3 Delete list items
-1. Swipe left (iOS) or use delete gesture (macOS) on a list item.
+1. Swipe left on a list item.
 2. Delete it.
 
 **Expected**: Item is removed from the list.
@@ -184,19 +175,13 @@ Repeat in **Ideas List**.
 
 **Expected**: Notification appears stating a recurring item is still active.
 
-## 8. Persistence & sync
+## 8. Persistence
 
 ### 8.1 Local persistence
 1. Add tasks, ideas, work items, and subtasks.
 2. Close and relaunch the app.
 
 **Expected**: All data persists across restarts.
-
-### 8.2 iCloud sync (optional, if enabled)
-1. Sign into the same iCloud account on two devices/simulators.
-2. Modify data on one device.
-
-**Expected**: Changes replicate on the other device after a brief sync.
 
 ## 9. UI & accessibility checks
 
@@ -223,7 +208,7 @@ Use this as a quick final pass after changes:
 
 For any failure, capture:
 - App version/commit.
-- Platform (iOS/macOS) and OS version.
+- Platform (iOS) and OS version.
 - Steps to reproduce.
 - Expected vs. actual result.
 - Screenshot or screen recording when possible.

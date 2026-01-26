@@ -36,7 +36,7 @@ This repository contains a native iPhone app built with SwiftUI. It provides two
 - `TwoListTodo.xcodeproj` — Xcode project file.
 - `TwoListTodo/` — SwiftUI source, assets, and Info.plist.
 
-## Build and install on your iPhone (Xcode on macOS)
+## Build and install on your iPhone (Xcode)
 
 ### 1) Open the project
 
@@ -66,29 +66,6 @@ On your iPhone:
 2. Tap the developer profile and choose **Trust**.
 
 The app will now launch from your Home Screen.
-
-## Build and install the macOS app (Xcode on macOS)
-
-### 1) Open the project
-
-1. On your Mac, open **Xcode**.
-2. Choose **File → Open...** and select `TwoListTodo.xcodeproj` from this repo.
-
-### 2) Choose the macOS destination
-
-1. In Xcode’s toolbar, open the run destination menu.
-2. Select **My Mac** (native macOS) or **Mac Catalyst** if that is the available option.
-
-### 3) Build and run locally
-
-1. Click **Run** (▶︎) to build and launch the app on your Mac.
-2. The app will open like any other macOS app and can be quit from the menu bar.
-
-### 4) Create a distributable app (optional)
-
-1. Choose **Product → Archive** in Xcode.
-2. When the Organizer opens, select the latest archive and click **Distribute App**.
-3. Follow the prompts to export a signed `.app` or package for distribution.
 
 ## Notes
 
