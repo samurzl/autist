@@ -73,9 +73,11 @@ private enum Weekday: String, CaseIterable, Identifiable, Codable {
 private struct RecurringSeries: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
+    var priority: Int = 3
     var frequency: RecurrenceFrequency
     var intervalDays: Int = 2
     var weeklyDays: Set<Weekday> = []
+    var dueDateOffsetDays: Int? = nil
     var lastGeneratedDate: Date = Date()
 }
 
@@ -349,12 +351,15 @@ struct ContentView: View {
         }
     }
 
-    private func addSeriesItem(_ series: RecurringSeries, to items: inout [TodoItem]) {
+    private func addSeriesItem(_ series: RecurringSeries, to items: inout [TodoItem], generationDate: Date = Date()) {
         if items.contains(where: { $0.seriesID == series.id }) { return }
+        let dueDate = series.dueDateOffsetDays.flatMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: generationDate)
+        }
         let newItem = TodoItem(
             title: series.title,
-            priority: 3,
-            dueDate: nil,
+            priority: series.priority,
+            dueDate: dueDate,
             subtasks: [],
             status: .active,
             seriesID: series.id
@@ -469,7 +474,7 @@ struct ContentView: View {
                         seriesID: series.id
                     )
                 } else {
-                    addSeriesItem(series, to: &workingItems)
+                    addSeriesItem(series, to: &workingItems, generationDate: now)
                     seriesList[index].lastGeneratedDate = now
                 }
             }
@@ -519,7 +524,15 @@ private struct ItemsListView: View {
             List {
                 Section {
                     ForEach(items) { item in
-                        ListItemRow(item: item, onMoveToWork: { onMoveToWork(item) })
+                        ListItemRow(item: item)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    onMoveToWork(item)
+                                } label: {
+                                    Label("Work Area", systemImage: "arrow.right.circle.fill")
+                                }
+                                .tint(.accentColor)
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
                                     onEdit(item)
@@ -538,8 +551,6 @@ private struct ItemsListView: View {
                     .onDelete(perform: onDelete)
                 } header: {
                     Text(title)
-                } footer: {
-                    Text("Tap the left button to move an item into the work area.")
                 }
             }
             .listStyle(.insetGrouped)
@@ -640,6 +651,16 @@ private struct WorkAreaView: View {
         }
     }
 
+    private func seriesMeta(_ series: RecurringSeries) -> String {
+        var parts: [String] = ["P\(series.priority)"]
+        if let offset = series.dueDateOffsetDays {
+            parts.append("Due \(offset) days after")
+        } else {
+            parts.append("No due date")
+        }
+        return parts.joined(separator: " • ")
+    }
+
     private var recurringSeriesView: some View {
         List {
             Section {
@@ -657,6 +678,9 @@ private struct WorkAreaView: View {
                             .font(.headline)
                         Text(seriesDescription(entry))
                             .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(seriesMeta(entry))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     .swipeActions(edge: .trailing) {
@@ -731,14 +755,21 @@ private struct WorkAreaView: View {
         var newSeries = updated
         newSeries.lastGeneratedDate = series[index].lastGeneratedDate
         series[index] = newSeries
+        let dueDate = updated.dueDateOffsetDays.flatMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: newSeries.lastGeneratedDate)
+        }
         for itemIndex in items.indices {
             if items[itemIndex].seriesID == updated.id {
                 items[itemIndex].title = updated.title
+                items[itemIndex].priority = updated.priority
+                items[itemIndex].dueDate = dueDate
             }
         }
         for itemIndex in graveyard.indices {
             if graveyard[itemIndex].seriesID == updated.id {
                 graveyard[itemIndex].title = updated.title
+                graveyard[itemIndex].priority = updated.priority
+                graveyard[itemIndex].dueDate = dueDate
             }
         }
     }
@@ -779,19 +810,9 @@ private struct UnavailableContentView: View {
 
 private struct ListItemRow: View {
     let item: TodoItem
-    let onMoveToWork: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Button {
-                onMoveToWork()
-            } label: {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.title)
                     .font(.headline)
@@ -1191,12 +1212,23 @@ private struct AddSeriesSheet: View {
 
     @State private var title = ""
     @State private var frequency: RecurrenceFrequency = .everyDays
+    @State private var priority = 3
+    @State private var hasDueDate = false
+    @State private var dueDateOffsetDays = 1
     @State private var intervalDays = 2
     @State private var weeklyDays: Set<Weekday> = [.monday]
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Details") {
+                    Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has due date", isOn: $hasDueDate)
+                    if hasDueDate {
+                        Stepper("Due \(dueDateOffsetDays) days after", value: $dueDateOffsetDays, in: 0...30)
+                    }
+                }
+
                 Section("Series") {
                     TextField("Title", text: $title)
 #if os(iOS)
@@ -1237,6 +1269,8 @@ private struct AddSeriesSheet: View {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
                         var series = RecurringSeries(title: trimmed, frequency: frequency)
+                        series.priority = priority
+                        series.dueDateOffsetDays = hasDueDate ? dueDateOffsetDays : nil
                         if frequency == .everyDays {
                             series.intervalDays = intervalDays
                         } else {
@@ -1277,6 +1311,9 @@ private struct EditSeriesSheet: View {
 
     @State private var title: String
     @State private var frequency: RecurrenceFrequency
+    @State private var priority: Int
+    @State private var hasDueDate: Bool
+    @State private var dueDateOffsetDays: Int
     @State private var intervalDays: Int
     @State private var weeklyDays: Set<Weekday>
 
@@ -1285,6 +1322,9 @@ private struct EditSeriesSheet: View {
         self.onSave = onSave
         _title = State(initialValue: series.title)
         _frequency = State(initialValue: series.frequency)
+        _priority = State(initialValue: series.priority)
+        _hasDueDate = State(initialValue: series.dueDateOffsetDays != nil)
+        _dueDateOffsetDays = State(initialValue: series.dueDateOffsetDays ?? 1)
         _intervalDays = State(initialValue: series.intervalDays)
         _weeklyDays = State(initialValue: series.weeklyDays)
     }
@@ -1292,6 +1332,14 @@ private struct EditSeriesSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Details") {
+                    Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has due date", isOn: $hasDueDate)
+                    if hasDueDate {
+                        Stepper("Due \(dueDateOffsetDays) days after", value: $dueDateOffsetDays, in: 0...30)
+                    }
+                }
+
                 Section("Series") {
                     TextField("Title", text: $title)
 #if os(iOS)
@@ -1334,6 +1382,8 @@ private struct EditSeriesSheet: View {
                         var updated = series
                         updated.title = trimmed
                         updated.frequency = frequency
+                        updated.priority = priority
+                        updated.dueDateOffsetDays = hasDueDate ? dueDateOffsetDays : nil
                         if frequency == .everyDays {
                             updated.intervalDays = intervalDays
                             updated.weeklyDays = []
