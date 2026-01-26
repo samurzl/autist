@@ -106,6 +106,10 @@ private final class AppStatePersistence {
         UserDefaults.standard.set(data, forKey: localKey)
     }
 
+    func clear() {
+        UserDefaults.standard.removeObject(forKey: localKey)
+    }
+
     private func encode(_ state: AppState) -> Data? {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -168,6 +172,12 @@ private final class AppStateStore: ObservableObject {
         AppStatePersistence.shared.save(snapshot())
     }
 
+    func reset() {
+        apply(AppState())
+        AppStatePersistence.shared.clear()
+        save()
+    }
+
     private func load() {
         guard let state = AppStatePersistence.shared.load() else { return }
         apply(state)
@@ -191,6 +201,8 @@ struct ContentView: View {
 
     @State private var showingSeriesSheet = false
     @State private var seriesSheetKind: ListKind = .tasks
+    @State private var editingContext: EditingContext? = nil
+    @State private var showingResetAlert = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -213,6 +225,8 @@ struct ContentView: View {
                             items: store.tasks,
                             onMoveToWork: { moveToWorkArea(item: $0, from: .tasks) },
                             onDelete: removeTasks,
+                            onDeleteItem: { deleteItem($0, from: .tasks) },
+                            onEdit: { startEditing(item: $0, kind: .tasks) },
                             onAddTapped: { openAddSheet(for: .tasks) }
                         )
                     case .ideasList:
@@ -221,6 +235,8 @@ struct ContentView: View {
                             items: store.ideas,
                             onMoveToWork: { moveToWorkArea(item: $0, from: .ideas) },
                             onDelete: removeIdeas,
+                            onDeleteItem: { deleteItem($0, from: .ideas) },
+                            onEdit: { startEditing(item: $0, kind: .ideas) },
                             onAddTapped: { openAddSheet(for: .ideas) }
                         )
                     case .tasksWork:
@@ -249,6 +265,20 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Two-List Todo")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(role: .destructive) {
+                            showingResetAlert = true
+                        } label: {
+                            Label("Reset all data", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("App options")
+                }
+            }
             .sheet(isPresented: $showingAddSheet) {
                 AddItemSheet(kind: addSheetKind) { item in
                     addItem(item, to: addSheetKind)
@@ -258,6 +288,19 @@ struct ContentView: View {
                 AddSeriesSheet { series in
                     addSeries(series, to: seriesSheetKind)
                 }
+            }
+            .sheet(item: $editingContext) { context in
+                EditItemSheet(item: context.item) { updated in
+                    updateItem(updated, in: context.kind)
+                }
+            }
+            .alert("Reset all data?", isPresented: $showingResetAlert) {
+                Button("Reset", role: .destructive) {
+                    store.reset()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes all tasks, ideas, work area items, and recurring series from this device.")
             }
             .onAppear {
                 NotificationManager.shared.requestAuthorization()
@@ -280,6 +323,10 @@ struct ContentView: View {
     private func openSeriesSheet(for kind: ListKind) {
         seriesSheetKind = kind
         showingSeriesSheet = true
+    }
+
+    private func startEditing(item: TodoItem, kind: ListKind) {
+        editingContext = EditingContext(item: item, kind: kind)
     }
 
     private func addItem(_ item: TodoItem, to kind: ListKind) {
@@ -321,6 +368,26 @@ struct ContentView: View {
 
     private func removeIdeas(at offsets: IndexSet) {
         store.ideas.remove(atOffsets: offsets)
+    }
+
+    private func deleteItem(_ item: TodoItem, from kind: ListKind) {
+        switch kind {
+        case .tasks:
+            store.tasks.removeAll { $0.id == item.id }
+        case .ideas:
+            store.ideas.removeAll { $0.id == item.id }
+        }
+    }
+
+    private func updateItem(_ item: TodoItem, in kind: ListKind) {
+        switch kind {
+        case .tasks:
+            guard let index = store.tasks.firstIndex(where: { $0.id == item.id }) else { return }
+            store.tasks[index] = item
+        case .ideas:
+            guard let index = store.ideas.firstIndex(where: { $0.id == item.id }) else { return }
+            store.ideas[index] = item
+        }
     }
 
     private func moveToWorkArea(item: TodoItem, from kind: ListKind) {
@@ -431,11 +498,20 @@ struct ContentView: View {
     }
 }
 
+private struct EditingContext: Identifiable {
+    let item: TodoItem
+    let kind: ListKind
+
+    var id: UUID { item.id }
+}
+
 private struct ItemsListView: View {
     let title: String
     let items: [TodoItem]
     let onMoveToWork: (TodoItem) -> Void
     let onDelete: (IndexSet) -> Void
+    let onDeleteItem: (TodoItem) -> Void
+    let onEdit: (TodoItem) -> Void
     let onAddTapped: () -> Void
 
     var body: some View {
@@ -444,6 +520,20 @@ private struct ItemsListView: View {
                 Section {
                     ForEach(items) { item in
                         ListItemRow(item: item, onMoveToWork: { onMoveToWork(item) })
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    onEdit(item)
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+
+                                Button(role: .destructive) {
+                                    onDeleteItem(item)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                     }
                     .onDelete(perform: onDelete)
                 } header: {
@@ -1001,6 +1091,85 @@ private struct AddItemSheet: View {
                         guard !trimmed.isEmpty else { return }
                         let item = TodoItem(title: trimmed, priority: priority, dueDate: hasDueDate ? dueDate : nil)
                         onAdd(item)
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct EditItemSheet: View {
+    let item: TodoItem
+    let onSave: (TodoItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title: String
+    @State private var priority: Int
+    @State private var hasDueDate: Bool
+    @State private var dueDate: Date
+    @State private var showDueDatePicker = false
+
+    init(item: TodoItem, onSave: @escaping (TodoItem) -> Void) {
+        self.item = item
+        self.onSave = onSave
+        _title = State(initialValue: item.title)
+        _priority = State(initialValue: item.priority)
+        _hasDueDate = State(initialValue: item.dueDate != nil)
+        _dueDate = State(initialValue: item.dueDate ?? Date())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
+                    Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has due date", isOn: $hasDueDate)
+                    if hasDueDate {
+                        Button {
+                            showDueDatePicker = true
+                        } label: {
+                            HStack {
+                                Text("Due date")
+                                Spacer()
+                                Text(dueDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showDueDatePicker) {
+                            DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .onChange(of: dueDate) { _ in
+                                    showDueDatePicker = false
+                                }
+                                .padding()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit Item")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        var updated = item
+                        updated.title = trimmed
+                        updated.priority = priority
+                        updated.dueDate = hasDueDate ? dueDate : nil
+                        onSave(updated)
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
