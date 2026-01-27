@@ -579,7 +579,7 @@ private struct WorkAreaView: View {
     let onAddSeriesTapped: () -> Void
 
     @State private var activeSheet: WorkAreaSheet? = nil
-    @State private var editingSeriesID: UUID? = nil
+    @State private var editingSeries: RecurringSeries? = nil
 
     var body: some View {
         List {
@@ -685,7 +685,7 @@ private struct WorkAreaView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
-                            editingSeriesID = entry.id
+                            editingSeries = entry
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
