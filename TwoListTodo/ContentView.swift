@@ -669,8 +669,8 @@ private struct WorkAreaView: View {
                         destination: EditSeriesSheet(series: entry) { updated in
                             updateSeries(updated)
                         },
-                        tag: entry.id,
-                        selection: $editingSeriesID
+                        tag: entry,
+                        selection: $editingSeries
                     ) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.title)
