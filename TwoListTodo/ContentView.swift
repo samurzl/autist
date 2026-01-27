@@ -20,6 +20,7 @@ private struct TodoItem: Identifiable, Hashable, Codable {
     var title: String
     var priority: Int
     var dueDate: Date?
+    var scheduledDate: Date? = nil
     var subtasks: [Subtask] = []
     var status: WorkingStatus? = nil
     var seriesID: UUID? = nil
@@ -307,10 +308,12 @@ struct ContentView: View {
             .onAppear {
                 NotificationManager.shared.requestAuthorization()
                 NotificationManager.shared.scheduleDailyReminders()
+                processScheduledItems()
                 processRecurringSeries()
             }
             .onChange(of: scenePhase) { newValue in
                 if newValue == .active {
+                    processScheduledItems()
                     processRecurringSeries()
                 }
             }
@@ -401,11 +404,13 @@ struct ContentView: View {
             guard let index = store.tasks.firstIndex(where: { $0.id == item.id }) else { return }
             var updated = store.tasks.remove(at: index)
             updated.status = .active
+            updated.scheduledDate = nil
             store.tasksWorking.insert(updated, at: 0)
         case .ideas:
             guard let index = store.ideas.firstIndex(where: { $0.id == item.id }) else { return }
             var updated = store.ideas.remove(at: index)
             updated.status = .active
+            updated.scheduledDate = nil
             store.ideasWorking.insert(updated, at: 0)
         }
     }
@@ -454,6 +459,35 @@ struct ContentView: View {
     private func processRecurringSeries() {
         processRecurringSeries(for: &store.tasksSeries, workingItems: &store.tasksWorking, listKind: .tasks)
         processRecurringSeries(for: &store.ideasSeries, workingItems: &store.ideasWorking, listKind: .ideas)
+    }
+
+    private func processScheduledItems() {
+        processScheduledItems(in: &store.tasks, workingItems: &store.tasksWorking)
+        processScheduledItems(in: &store.ideas, workingItems: &store.ideasWorking)
+    }
+
+    private func processScheduledItems(
+        in backlogItems: inout [TodoItem],
+        workingItems: inout [TodoItem]
+    ) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let indicesToMove = backlogItems.enumerated().compactMap { index, item -> Int? in
+            guard let scheduledDate = item.scheduledDate else { return nil }
+            return calendar.startOfDay(for: scheduledDate) <= today ? index : nil
+        }
+
+        guard !indicesToMove.isEmpty else { return }
+
+        for index in indicesToMove.sorted(by: >) {
+            var item = backlogItems.remove(at: index)
+            item.status = .active
+            item.scheduledDate = nil
+            if workingItems.contains(where: { $0.id == item.id }) {
+                continue
+            }
+            workingItems.insert(item, at: 0)
+        }
     }
 
     private func processRecurringSeries(
@@ -591,8 +625,8 @@ private struct WorkAreaView: View {
                         UnavailableContentView(title: "No active tasks", systemImage: "tray")
                     }
                 }
-                ForEach($items) { $item in
-                    WorkItemRow(item: $item, onComplete: onComplete, onMoveToBacklog: onMoveToBacklog)
+                ForEach(sortedItemIndices, id: \.self) { index in
+                    WorkItemRow(item: $items[index], onComplete: onComplete, onMoveToBacklog: onMoveToBacklog)
                 }
             } header: {
                 Text(title)
@@ -631,6 +665,29 @@ private struct WorkAreaView: View {
         }
         .onChange(of: activeSheet) { _ in
             seriesNavigationPath = NavigationPath()
+        }
+    }
+
+    private var sortedItemIndices: [Int] {
+        items.indices.sorted { lhs, rhs in
+            let left = items[lhs]
+            let right = items[rhs]
+            let leftHasDue = left.dueDate != nil
+            let rightHasDue = right.dueDate != nil
+
+            if leftHasDue != rightHasDue {
+                return leftHasDue && !rightHasDue
+            }
+
+            if left.priority != right.priority {
+                return left.priority < right.priority
+            }
+
+            if let leftDue = left.dueDate, let rightDue = right.dueDate, leftDue != rightDue {
+                return leftDue < rightDue
+            }
+
+            return left.title.localizedCaseInsensitiveCompare(right.title) == .orderedAscending
         }
     }
 
@@ -848,6 +905,16 @@ private struct ListItemRow: View {
                         Text("No due date")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let scheduledDate = item.scheduledDate {
+                        Label {
+                            Text(scheduledDate, style: .date)
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1084,6 +1151,9 @@ private struct AddItemSheet: View {
     @State private var hasDueDate = false
     @State private var dueDate = Date()
     @State private var showDueDatePicker = false
+    @State private var isScheduled = false
+    @State private var scheduledDate = Date()
+    @State private var showScheduledDatePicker = false
 
     var body: some View {
         NavigationStack {
@@ -1116,6 +1186,29 @@ private struct AddItemSheet: View {
                                 .padding()
                         }
                     }
+
+                    Toggle("Schedule for work area", isOn: $isScheduled)
+                    if isScheduled {
+                        Button {
+                            showScheduledDatePicker = true
+                        } label: {
+                            HStack {
+                                Text("Scheduled date")
+                                Spacer()
+                                Text(scheduledDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showScheduledDatePicker) {
+                            DatePicker("Scheduled date", selection: $scheduledDate, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .onChange(of: scheduledDate) { _ in
+                                    showScheduledDatePicker = false
+                                }
+                                .padding()
+                        }
+                    }
                 }
             }
             .navigationTitle(kind == .tasks ? "Add Task" : "Add Idea")
@@ -1124,7 +1217,12 @@ private struct AddItemSheet: View {
                     Button("Add") {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
-                        let item = TodoItem(title: trimmed, priority: priority, dueDate: hasDueDate ? dueDate : nil)
+                        let item = TodoItem(
+                            title: trimmed,
+                            priority: priority,
+                            dueDate: hasDueDate ? dueDate : nil,
+                            scheduledDate: isScheduled ? scheduledDate : nil
+                        )
                         onAdd(item)
                         dismiss()
                     }
@@ -1151,6 +1249,9 @@ private struct EditItemSheet: View {
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
     @State private var showDueDatePicker = false
+    @State private var isScheduled: Bool
+    @State private var scheduledDate: Date
+    @State private var showScheduledDatePicker = false
 
     init(item: TodoItem, onSave: @escaping (TodoItem) -> Void) {
         self.item = item
@@ -1159,6 +1260,8 @@ private struct EditItemSheet: View {
         _priority = State(initialValue: item.priority)
         _hasDueDate = State(initialValue: item.dueDate != nil)
         _dueDate = State(initialValue: item.dueDate ?? Date())
+        _isScheduled = State(initialValue: item.scheduledDate != nil)
+        _scheduledDate = State(initialValue: item.scheduledDate ?? Date())
     }
 
     var body: some View {
@@ -1192,6 +1295,29 @@ private struct EditItemSheet: View {
                                 .padding()
                         }
                     }
+
+                    Toggle("Schedule for work area", isOn: $isScheduled)
+                    if isScheduled {
+                        Button {
+                            showScheduledDatePicker = true
+                        } label: {
+                            HStack {
+                                Text("Scheduled date")
+                                Spacer()
+                                Text(scheduledDate, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showScheduledDatePicker) {
+                            DatePicker("Scheduled date", selection: $scheduledDate, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .onChange(of: scheduledDate) { _ in
+                                    showScheduledDatePicker = false
+                                }
+                                .padding()
+                        }
+                    }
                 }
             }
             .navigationTitle("Edit Item")
@@ -1204,6 +1330,7 @@ private struct EditItemSheet: View {
                         updated.title = trimmed
                         updated.priority = priority
                         updated.dueDate = hasDueDate ? dueDate : nil
+                        updated.scheduledDate = isScheduled ? scheduledDate : nil
                         onSave(updated)
                         dismiss()
                     }
