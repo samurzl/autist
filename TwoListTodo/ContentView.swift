@@ -680,7 +680,7 @@ private struct WorkAreaView: View {
             }
 
             if left.priority != right.priority {
-                return left.priority < right.priority
+                return left.priority > right.priority
             }
 
             if let leftDue = left.dueDate, let rightDue = right.dueDate, leftDue != rightDue {
