@@ -9,33 +9,38 @@ private enum WorkingStatus: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 }
 
-private struct Subtask: Identifiable, Hashable, Codable {
+private struct IdeaItem: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
-    var isDone = false
+    var detail: String
 }
 
-private struct TodoItem: Identifiable, Hashable, Codable {
+private struct ProjectItem: Identifiable, Hashable, Codable {
+    var id = UUID()
+    var title: String
+    var detail: String
+    var status: WorkingStatus = .active
+}
+
+private struct TaskItem: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
     var priority: Int
     var dueDate: Date?
+    var status: WorkingStatus = .active
+    var createdAt: Date = Date()
+    var lastPriorityBumpDate: Date = Date()
+    var dependencyID: UUID? = nil
+    var lastWorkedAt: Date? = nil
     var scheduledDate: Date? = nil
-    var subtasks: [Subtask] = []
-    var status: WorkingStatus? = nil
     var seriesID: UUID? = nil
 }
 
-private enum ListKind: String, Codable {
-    case tasks
-    case ideas
-}
-
 private enum AppTab: String, CaseIterable, Identifiable, Codable {
-    case tasksList = "Tasks List"
-    case ideasList = "Ideas List"
-    case tasksWork = "Tasks Work"
-    case ideasWork = "Ideas Work"
+    case ideas = "Ideas"
+    case tasks = "Tasks"
+    case projects = "Projects"
+    case guide = "Guide"
 
     var id: String { rawValue }
 }
@@ -83,15 +88,12 @@ private struct RecurringSeries: Identifiable, Hashable, Codable {
 }
 
 private struct AppState: Codable {
-    var selectedTab: AppTab = .tasksList
-    var tasks: [TodoItem] = []
-    var ideas: [TodoItem] = []
-    var tasksWorking: [TodoItem] = []
-    var ideasWorking: [TodoItem] = []
-    var tasksGraveyard: [TodoItem] = []
-    var ideasGraveyard: [TodoItem] = []
+    var selectedTab: AppTab = .ideas
+    var ideas: [IdeaItem] = []
+    var projects: [ProjectItem] = []
+    var tasks: [TaskItem] = []
+    var scheduledTasks: [TaskItem] = []
     var tasksSeries: [RecurringSeries] = []
-    var ideasSeries: [RecurringSeries] = []
 }
 
 private final class AppStatePersistence {
@@ -128,15 +130,12 @@ private final class AppStatePersistence {
 
 @MainActor
 private final class AppStateStore: ObservableObject {
-    @Published var selectedTab: AppTab = .tasksList
-    @Published var tasks: [TodoItem] = []
-    @Published var ideas: [TodoItem] = []
-    @Published var tasksWorking: [TodoItem] = []
-    @Published var ideasWorking: [TodoItem] = []
-    @Published var tasksGraveyard: [TodoItem] = []
-    @Published var ideasGraveyard: [TodoItem] = []
+    @Published var selectedTab: AppTab = .ideas
+    @Published var ideas: [IdeaItem] = []
+    @Published var projects: [ProjectItem] = []
+    @Published var tasks: [TaskItem] = []
+    @Published var scheduledTasks: [TaskItem] = []
     @Published var tasksSeries: [RecurringSeries] = []
-    @Published var ideasSeries: [RecurringSeries] = []
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -148,27 +147,21 @@ private final class AppStateStore: ObservableObject {
     func snapshot() -> AppState {
         AppState(
             selectedTab: selectedTab,
-            tasks: tasks,
             ideas: ideas,
-            tasksWorking: tasksWorking,
-            ideasWorking: ideasWorking,
-            tasksGraveyard: tasksGraveyard,
-            ideasGraveyard: ideasGraveyard,
-            tasksSeries: tasksSeries,
-            ideasSeries: ideasSeries
+            projects: projects,
+            tasks: tasks,
+            scheduledTasks: scheduledTasks,
+            tasksSeries: tasksSeries
         )
     }
 
     func apply(_ state: AppState) {
         selectedTab = state.selectedTab
-        tasks = state.tasks
         ideas = state.ideas
-        tasksWorking = state.tasksWorking
-        ideasWorking = state.ideasWorking
-        tasksGraveyard = state.tasksGraveyard
-        ideasGraveyard = state.ideasGraveyard
+        projects = state.projects
+        tasks = state.tasks
+        scheduledTasks = state.scheduledTasks
         tasksSeries = state.tasksSeries
-        ideasSeries = state.ideasSeries
     }
 
     func save() {
@@ -199,12 +192,13 @@ private final class AppStateStore: ObservableObject {
 struct ContentView: View {
     @StateObject private var store = AppStateStore()
 
-    @State private var showingAddSheet = false
-    @State private var addSheetKind: ListKind = .tasks
-
+    @State private var showingAddIdeaSheet = false
+    @State private var showingAddTaskSheet = false
     @State private var showingSeriesSheet = false
-    @State private var seriesSheetKind: ListKind = .tasks
-    @State private var editingContext: EditingContext? = nil
+    @State private var showingScheduledSheet = false
+    @State private var editingIdea: IdeaItem? = nil
+    @State private var editingTask: TaskItem? = nil
+    @State private var editingScheduledTask: TaskItem? = nil
     @State private var showingResetAlert = false
 
     @Environment(\.scenePhase) private var scenePhase
@@ -222,47 +216,37 @@ struct ContentView: View {
 
                 Group {
                     switch store.selectedTab {
-                    case .tasksList:
-                        ItemsListView(
-                            title: "Tasks",
-                            items: store.tasks,
-                            onMoveToWork: { moveToWorkArea(item: $0, from: .tasks) },
-                            onDelete: removeTasks,
-                            onDeleteItem: { deleteItem($0, from: .tasks) },
-                            onEdit: { startEditing(item: $0, kind: .tasks) },
-                            onAddTapped: { openAddSheet(for: .tasks) }
+                    case .ideas:
+                        IdeasListView(
+                            ideas: store.ideas,
+                            onMoveToProject: moveIdeaToProject,
+                            onDelete: deleteIdeas,
+                            onDeleteItem: deleteIdea,
+                            onEdit: { editingIdea = $0 },
+                            onAddTapped: { showingAddIdeaSheet = true }
                         )
-                    case .ideasList:
-                        ItemsListView(
-                            title: "Ideas",
-                            items: store.ideas,
-                            onMoveToWork: { moveToWorkArea(item: $0, from: .ideas) },
-                            onDelete: removeIdeas,
-                            onDeleteItem: { deleteItem($0, from: .ideas) },
-                            onEdit: { startEditing(item: $0, kind: .ideas) },
-                            onAddTapped: { openAddSheet(for: .ideas) }
+                    case .tasks:
+                        TasksListView(
+                            tasks: $store.tasks,
+                            onComplete: completeTask,
+                            onAddTapped: { showingAddTaskSheet = true },
+                            onShowSeries: { showingSeriesSheet = true },
+                            onShowScheduled: { showingScheduledSheet = true },
+                            onEdit: { editingTask = $0 },
+                            onDelete: deleteTask
                         )
-                    case .tasksWork:
-                        WorkAreaView(
-                            title: "Tasks Work Area",
-                            items: $store.tasksWorking,
-                            graveyard: $store.tasksGraveyard,
-                            series: $store.tasksSeries,
-                            onComplete: { completeItem($0, in: .tasks) },
-                            onMoveToBacklog: { moveToBacklog($0, from: .tasks) },
-                            onRestore: { restoreItem($0, in: .tasks) },
-                            onAddSeriesTapped: { openSeriesSheet(for: .tasks) }
+                    case .projects:
+                        ProjectsView(
+                            projects: $store.projects,
+                            onComplete: completeProject
                         )
-                    case .ideasWork:
-                        WorkAreaView(
-                            title: "Ideas Work Area",
-                            items: $store.ideasWorking,
-                            graveyard: $store.ideasGraveyard,
-                            series: $store.ideasSeries,
-                            onComplete: { completeItem($0, in: .ideas) },
-                            onMoveToBacklog: { moveToBacklog($0, from: .ideas) },
-                            onRestore: { restoreItem($0, in: .ideas) },
-                            onAddSeriesTapped: { openSeriesSheet(for: .ideas) }
+                    case .guide:
+                        GuideView(
+                            tasks: $store.tasks,
+                            projects: $store.projects,
+                            onCompleteTask: completeTask,
+                            onMarkWorked: markTaskWorked,
+                            onCompleteProject: completeProject
                         )
                     }
                 }
@@ -282,19 +266,38 @@ struct ContentView: View {
                     .accessibilityLabel("App options")
                 }
             }
-            .sheet(isPresented: $showingAddSheet) {
-                AddItemSheet(kind: addSheetKind) { item in
-                    addItem(item, to: addSheetKind)
+            .sheet(isPresented: $showingAddIdeaSheet) {
+                AddIdeaSheet { idea in
+                    store.ideas.insert(idea, at: 0)
+                }
+            }
+            .sheet(isPresented: $showingAddTaskSheet) {
+                AddTaskSheet { task, scheduleOnly in
+                    addTask(task, scheduleOnly: scheduleOnly)
                 }
             }
             .sheet(isPresented: $showingSeriesSheet) {
-                AddSeriesSheet { series in
-                    addSeries(series, to: seriesSheetKind)
+                RecurringSeriesView(series: $store.tasksSeries, tasks: $store.tasks)
+            }
+            .sheet(isPresented: $showingScheduledSheet) {
+                ScheduledTasksView(
+                    scheduledTasks: $store.scheduledTasks,
+                    onEdit: { editingScheduledTask = $0 }
+                )
+            }
+            .sheet(item: $editingIdea) { idea in
+                EditIdeaSheet(idea: idea) { updated in
+                    updateIdea(updated)
                 }
             }
-            .sheet(item: $editingContext) { context in
-                EditItemSheet(item: context.item) { updated in
-                    updateItem(updated, in: context.kind)
+            .sheet(item: $editingTask) { task in
+                EditTaskSheet(task: task) { updated in
+                    updateTask(updated)
+                }
+            }
+            .sheet(item: $editingScheduledTask) { task in
+                EditTaskSheet(task: task) { updated in
+                    updateScheduledTask(updated)
                 }
             }
             .alert("Reset all data?", isPresented: $showingResetAlert) {
@@ -308,171 +311,119 @@ struct ContentView: View {
             .onAppear {
                 NotificationManager.shared.requestAuthorization()
                 NotificationManager.shared.scheduleDailyReminders()
-                processScheduledItems()
+                processScheduledTasks()
                 processRecurringSeries()
+                updateTaskPriorities()
             }
             .onChange(of: scenePhase) { newValue in
                 if newValue == .active {
-                    processScheduledItems()
+                    processScheduledTasks()
                     processRecurringSeries()
+                    updateTaskPriorities()
                 }
             }
         }
     }
-
-    private func openAddSheet(for kind: ListKind) {
-        addSheetKind = kind
-        showingAddSheet = true
-    }
-
-    private func openSeriesSheet(for kind: ListKind) {
-        seriesSheetKind = kind
-        showingSeriesSheet = true
-    }
-
-    private func startEditing(item: TodoItem, kind: ListKind) {
-        editingContext = EditingContext(item: item, kind: kind)
-    }
-
-    private func addItem(_ item: TodoItem, to kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasks.insert(item, at: 0)
-        case .ideas:
-            store.ideas.insert(item, at: 0)
+    private func addTask(_ task: TaskItem, scheduleOnly: Bool) {
+        if scheduleOnly {
+            store.scheduledTasks.insert(task, at: 0)
+        } else {
+            store.tasks.insert(task, at: 0)
         }
     }
 
-    private func addSeries(_ series: RecurringSeries, to kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasksSeries.append(series)
-            addSeriesItem(series, to: &store.tasksWorking)
-        case .ideas:
-            store.ideasSeries.append(series)
-            addSeriesItem(series, to: &store.ideasWorking)
-        }
-    }
-
-    private func addSeriesItem(_ series: RecurringSeries, to items: inout [TodoItem], generationDate: Date = Date()) {
+    private func addSeriesItem(_ series: RecurringSeries, to items: inout [TaskItem], generationDate: Date = Date()) {
         if items.contains(where: { $0.seriesID == series.id }) { return }
         let dueDate = series.dueDateOffsetDays.flatMap { offset in
             Calendar.current.date(byAdding: .day, value: offset, to: generationDate)
         }
-        let newItem = TodoItem(
+        let newItem = TaskItem(
             title: series.title,
             priority: series.priority,
             dueDate: dueDate,
-            subtasks: [],
             status: .active,
+            createdAt: generationDate,
+            lastPriorityBumpDate: generationDate,
             seriesID: series.id
         )
         items.insert(newItem, at: 0)
     }
 
-    private func removeTasks(at offsets: IndexSet) {
-        store.tasks.remove(atOffsets: offsets)
-    }
-
-    private func removeIdeas(at offsets: IndexSet) {
+    private func deleteIdeas(at offsets: IndexSet) {
         store.ideas.remove(atOffsets: offsets)
     }
 
-    private func deleteItem(_ item: TodoItem, from kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasks.removeAll { $0.id == item.id }
-        case .ideas:
-            store.ideas.removeAll { $0.id == item.id }
+    private func deleteIdea(_ idea: IdeaItem) {
+        store.ideas.removeAll { $0.id == idea.id }
+    }
+
+    private func deleteTask(_ task: TaskItem) {
+        store.tasks.removeAll { $0.id == task.id }
+        store.scheduledTasks.removeAll { $0.id == task.id }
+    }
+
+    private func updateIdea(_ idea: IdeaItem) {
+        guard let index = store.ideas.firstIndex(where: { $0.id == idea.id }) else { return }
+        store.ideas[index] = idea
+    }
+
+    private func updateTask(_ task: TaskItem) {
+        guard let index = store.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        if task.scheduledDate != nil {
+            store.tasks.remove(at: index)
+            store.scheduledTasks.insert(task, at: 0)
+        } else {
+            store.tasks[index] = task
         }
     }
 
-    private func updateItem(_ item: TodoItem, in kind: ListKind) {
-        switch kind {
-        case .tasks:
-            guard let index = store.tasks.firstIndex(where: { $0.id == item.id }) else { return }
-            store.tasks[index] = item
-        case .ideas:
-            guard let index = store.ideas.firstIndex(where: { $0.id == item.id }) else { return }
-            store.ideas[index] = item
+    private func updateScheduledTask(_ task: TaskItem) {
+        guard let index = store.scheduledTasks.firstIndex(where: { $0.id == task.id }) else { return }
+        if task.scheduledDate == nil {
+            store.scheduledTasks.remove(at: index)
+            store.tasks.insert(task, at: 0)
+        } else {
+            store.scheduledTasks[index] = task
         }
     }
 
-    private func moveToWorkArea(item: TodoItem, from kind: ListKind) {
-        switch kind {
-        case .tasks:
-            guard let index = store.tasks.firstIndex(where: { $0.id == item.id }) else { return }
-            var updated = store.tasks.remove(at: index)
-            updated.status = .active
-            updated.scheduledDate = nil
-            store.tasksWorking.insert(updated, at: 0)
-        case .ideas:
-            guard let index = store.ideas.firstIndex(where: { $0.id == item.id }) else { return }
-            var updated = store.ideas.remove(at: index)
-            updated.status = .active
-            updated.scheduledDate = nil
-            store.ideasWorking.insert(updated, at: 0)
+    private func moveIdeaToProject(_ idea: IdeaItem) {
+        guard let index = store.ideas.firstIndex(where: { $0.id == idea.id }) else { return }
+        let item = store.ideas.remove(at: index)
+        store.projects.insert(ProjectItem(title: item.title, detail: item.detail), at: 0)
+    }
+
+    private func completeTask(_ task: TaskItem) {
+        store.tasks.removeAll { $0.id == task.id }
+        activateDependentTasks(for: task)
+    }
+
+    private func markTaskWorked(_ task: TaskItem) {
+        guard let index = store.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        store.tasks[index].lastWorkedAt = Date()
+    }
+
+    private func activateDependentTasks(for completedTask: TaskItem) {
+        for index in store.tasks.indices {
+            if store.tasks[index].dependencyID == completedTask.id {
+                store.tasks[index].dependencyID = nil
+                store.tasks[index].status = .active
+            }
         }
     }
 
-    private func moveToBacklog(_ item: TodoItem, from kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasksWorking.removeAll { $0.id == item.id }
-            var updated = item
-            updated.status = nil
-            store.tasks.insert(updated, at: 0)
-        case .ideas:
-            store.ideasWorking.removeAll { $0.id == item.id }
-            var updated = item
-            updated.status = nil
-            store.ideas.insert(updated, at: 0)
-        }
-    }
-
-    private func completeItem(_ item: TodoItem, in kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasksWorking.removeAll { $0.id == item.id }
-            store.tasksGraveyard.insert(item, at: 0)
-        case .ideas:
-            store.ideasWorking.removeAll { $0.id == item.id }
-            store.ideasGraveyard.insert(item, at: 0)
-        }
-    }
-
-    private func restoreItem(_ item: TodoItem, in kind: ListKind) {
-        switch kind {
-        case .tasks:
-            store.tasksGraveyard.removeAll { $0.id == item.id }
-            var updated = item
-            updated.status = .active
-            store.tasksWorking.insert(updated, at: 0)
-        case .ideas:
-            store.ideasGraveyard.removeAll { $0.id == item.id }
-            var updated = item
-            updated.status = .active
-            store.ideasWorking.insert(updated, at: 0)
-        }
+    private func completeProject(_ project: ProjectItem) {
+        store.projects.removeAll { $0.id == project.id }
     }
 
     private func processRecurringSeries() {
-        processRecurringSeries(for: &store.tasksSeries, workingItems: &store.tasksWorking, listKind: .tasks)
-        processRecurringSeries(for: &store.ideasSeries, workingItems: &store.ideasWorking, listKind: .ideas)
+        processRecurringSeries(for: &store.tasksSeries, items: &store.tasks)
     }
 
-    private func processScheduledItems() {
-        processScheduledItems(in: &store.tasks, workingItems: &store.tasksWorking)
-        processScheduledItems(in: &store.ideas, workingItems: &store.ideasWorking)
-    }
-
-    private func processScheduledItems(
-        in backlogItems: inout [TodoItem],
-        workingItems: inout [TodoItem]
-    ) {
+    private func processScheduledTasks() {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let indicesToMove = backlogItems.enumerated().compactMap { index, item -> Int? in
+        let indicesToMove = store.scheduledTasks.enumerated().compactMap { index, item -> Int? in
             guard let scheduledDate = item.scheduledDate else { return nil }
             return calendar.startOfDay(for: scheduledDate) <= today ? index : nil
         }
@@ -480,20 +431,34 @@ struct ContentView: View {
         guard !indicesToMove.isEmpty else { return }
 
         for index in indicesToMove.sorted(by: >) {
-            var item = backlogItems.remove(at: index)
-            item.status = .active
+            var item = store.scheduledTasks.remove(at: index)
             item.scheduledDate = nil
-            if workingItems.contains(where: { $0.id == item.id }) {
+            item.status = .active
+            store.tasks.insert(item, at: 0)
+        }
+    }
+
+    private func updateTaskPriorities() {
+        let calendar = Calendar.current
+        let now = Date()
+        for index in store.tasks.indices {
+            if store.tasks[index].priority >= 5 {
                 continue
             }
-            workingItems.insert(item, at: 0)
+            let lastBump = store.tasks[index].lastPriorityBumpDate
+            guard let months = calendar.dateComponents([.month], from: lastBump, to: now).month,
+                  months > 0 else { continue }
+            let cappedPriority = min(store.tasks[index].priority + months, 4)
+            store.tasks[index].priority = cappedPriority
+            if let nextBumpDate = calendar.date(byAdding: .month, value: months, to: lastBump) {
+                store.tasks[index].lastPriorityBumpDate = nextBumpDate
+            }
         }
     }
 
     private func processRecurringSeries(
         for seriesList: inout [RecurringSeries],
-        workingItems: inout [TodoItem],
-        listKind: ListKind
+        items: inout [TaskItem]
     ) {
         let now = Date()
         let calendar = Calendar.current
@@ -501,14 +466,13 @@ struct ContentView: View {
             let series = seriesList[index]
             guard let nextDate = nextOccurrence(for: series, calendar: calendar) else { continue }
             if calendar.startOfDay(for: nextDate) <= calendar.startOfDay(for: now) {
-                if workingItems.contains(where: { $0.seriesID == series.id }) {
+                if items.contains(where: { $0.seriesID == series.id }) {
                     NotificationManager.shared.sendSeriesPendingReminder(
                         title: series.title,
-                        listKind: listKind,
                         seriesID: series.id
                     )
                 } else {
-                    addSeriesItem(series, to: &workingItems, generationDate: now)
+                    addSeriesItem(series, to: &items, generationDate: now)
                     seriesList[index].lastGeneratedDate = now
                 }
             }
@@ -537,43 +501,42 @@ struct ContentView: View {
     }
 }
 
-private struct EditingContext: Identifiable {
-    let item: TodoItem
-    let kind: ListKind
-
-    var id: UUID { item.id }
-}
-
-private struct ItemsListView: View {
-    let title: String
-    let items: [TodoItem]
-    let onMoveToWork: (TodoItem) -> Void
+private struct IdeasListView: View {
+    let ideas: [IdeaItem]
+    let onMoveToProject: (IdeaItem) -> Void
     let onDelete: (IndexSet) -> Void
-    let onDeleteItem: (TodoItem) -> Void
-    let onEdit: (TodoItem) -> Void
+    let onDeleteItem: (IdeaItem) -> Void
+    let onEdit: (IdeaItem) -> Void
     let onAddTapped: () -> Void
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List {
                 Section {
-                    ForEach(items) { item in
-                        ListItemRow(item: item)
+                    if ideas.isEmpty {
+                        if #available(iOS 17.0, *) {
+                            ContentUnavailableView("No ideas yet", systemImage: "lightbulb")
+                        } else {
+                            UnavailableContentView(title: "No ideas yet", systemImage: "lightbulb")
+                        }
+                    }
+                    ForEach(ideas) { idea in
+                        IdeaRow(idea: idea)
                             .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
                                 if value.translation.width > 120, abs(value.translation.width) > abs(value.translation.height) {
-                                    onMoveToWork(item)
+                                    onMoveToProject(idea)
                                 }
                             })
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
-                                    onEdit(item)
+                                    onEdit(idea)
                                 } label: {
                                     Label("Edit", systemImage: "pencil")
                                 }
                                 .tint(.blue)
 
                                 Button(role: .destructive) {
-                                    onDeleteItem(item)
+                                    onDeleteItem(idea)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -581,7 +544,7 @@ private struct ItemsListView: View {
                     }
                     .onDelete(perform: onDelete)
                 } header: {
-                    Text(title)
+                    Text("Ideas")
                 }
             }
             .listStyle(.insetGrouped)
@@ -596,266 +559,214 @@ private struct ItemsListView: View {
                     .background(Circle().fill(Color.accentColor))
                     .shadow(radius: 4)
             }
-            .accessibilityLabel("Add \(title)")
+            .accessibilityLabel("Add idea")
             .padding()
         }
     }
 }
 
-private struct WorkAreaView: View {
-    let title: String
-    @Binding var items: [TodoItem]
-    @Binding var graveyard: [TodoItem]
-    @Binding var series: [RecurringSeries]
-    let onComplete: (TodoItem) -> Void
-    let onMoveToBacklog: (TodoItem) -> Void
-    let onRestore: (TodoItem) -> Void
-    let onAddSeriesTapped: () -> Void
-
-    @State private var activeSheet: WorkAreaSheet? = nil
-    @State private var seriesNavigationPath = NavigationPath()
+private struct TasksListView: View {
+    @Binding var tasks: [TaskItem]
+    let onComplete: (TaskItem) -> Void
+    let onAddTapped: () -> Void
+    let onShowSeries: () -> Void
+    let onShowScheduled: () -> Void
+    let onEdit: (TaskItem) -> Void
+    let onDelete: (TaskItem) -> Void
 
     var body: some View {
-        List {
-            Section {
-                if items.isEmpty {
-                    if #available(iOS 17.0, *) {
-                        ContentUnavailableView("No active tasks", systemImage: "tray")
-                    } else {
-                        UnavailableContentView(title: "No active tasks", systemImage: "tray")
-                    }
-                }
-                ForEach(sortedItemIndices, id: \.self) { index in
-                    WorkItemRow(item: $items[index], onComplete: onComplete, onMoveToBacklog: onMoveToBacklog)
-                }
-            } header: {
-                Text(title)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        activeSheet = .recurringSeries
-                    } label: {
-                        Label("Recurring series", systemImage: "repeat")
-                    }
-
-                    Button {
-                        activeSheet = .graveyard
-                    } label: {
-                        Label("Graveyard", systemImage: "archivebox")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("Work area options")
-            }
-        }
-        .sheet(item: $activeSheet) { sheet in
-            NavigationStack(path: $seriesNavigationPath) {
-                switch sheet {
-                case .recurringSeries:
-                    recurringSeriesView
-                case .graveyard:
-                    graveyardView
-                }
-            }
-        }
-        .onChange(of: activeSheet) { _ in
-            seriesNavigationPath = NavigationPath()
-        }
-    }
-
-    private var sortedItemIndices: [Int] {
-        items.indices.sorted { lhs, rhs in
-            let left = items[lhs]
-            let right = items[rhs]
-            let leftHasDue = left.dueDate != nil
-            let rightHasDue = right.dueDate != nil
-
-            if leftHasDue != rightHasDue {
-                return leftHasDue && !rightHasDue
-            }
-
-            if left.priority != right.priority {
-                return left.priority > right.priority
-            }
-
-            if let leftDue = left.dueDate, let rightDue = right.dueDate, leftDue != rightDue {
-                return leftDue < rightDue
-            }
-
-            return left.title.localizedCaseInsensitiveCompare(right.title) == .orderedAscending
-        }
-    }
-
-    private func seriesDescription(_ series: RecurringSeries) -> String {
-        switch series.frequency {
-        case .everyDays:
-            return "Every \(series.intervalDays) days"
-        case .weekly:
-            let days = Weekday.allCases.filter { series.weeklyDays.contains($0) }
-                .map { $0.rawValue }
-                .joined(separator: ", ")
-            return "Weekly on \(days)"
-        }
-    }
-
-    private func seriesMeta(_ series: RecurringSeries) -> String {
-        var parts: [String] = ["P\(series.priority)"]
-        if let offset = series.dueDateOffsetDays {
-            parts.append("Due \(offset) days after")
-        } else {
-            parts.append("No due date")
-        }
-        return parts.joined(separator: " • ")
-    }
-
-    private var recurringSeriesView: some View {
-        List {
-            Section {
-                if series.isEmpty {
-                    if #available(iOS 17.0, *) {
-                        ContentUnavailableView("No recurring series", systemImage: "repeat")
-                    } else {
-                        UnavailableContentView(title: "No recurring series", systemImage: "repeat")
-                    }
-                }
-
-                ForEach(series) { entry in
-                    NavigationLink(value: entry) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.title)
-                                .font(.headline)
-                            Text(seriesDescription(entry))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(seriesMeta(entry))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+        ZStack(alignment: .bottomTrailing) {
+            List {
+                Section {
+                    if tasks.isEmpty {
+                        if #available(iOS 17.0, *) {
+                            ContentUnavailableView("No tasks yet", systemImage: "checklist")
+                        } else {
+                            UnavailableContentView(title: "No tasks yet", systemImage: "checklist")
                         }
                     }
-                    .swipeActions(edge: .trailing) {
+                    ForEach(sortedTaskIndices, id: \.self) { index in
+                        TaskRow(
+                            task: $tasks[index],
+                            allTasks: tasks,
+                            onComplete: onComplete
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                onEdit(tasks[index])
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+
+                            Button(role: .destructive) {
+                                onDelete(tasks[index])
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Tasks")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
                         Button {
-                            seriesNavigationPath.append(entry)
+                            onShowSeries()
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label("Recurring tasks", systemImage: "repeat")
                         }
-                        .tint(.blue)
 
-                        Button(role: .destructive) {
-                            removeSeries(entry)
+                        Button {
+                            onShowScheduled()
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Scheduled tasks", systemImage: "calendar")
                         }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
+                    .accessibilityLabel("Task options")
                 }
-                .onDelete { offsets in
-                    removeSeries(at: offsets)
-                }
+            }
 
-                Button {
-                    activeSheet = nil
-                    DispatchQueue.main.async {
-                        onAddSeriesTapped()
-                    }
-                } label: {
-                    Label("Add recurring series", systemImage: "repeat")
-                }
-            } footer: {
-                Text("Recurring series generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
+            Button {
+                onAddTapped()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding()
+                    .background(Circle().fill(Color.accentColor))
+                    .shadow(radius: 4)
             }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Recurring Series")
-        .navigationDestination(for: RecurringSeries.self) { entry in
-            EditSeriesSheet(series: entry) { updated in
-                updateSeries(updated)
-            }
+            .accessibilityLabel("Add task")
+            .padding()
         }
     }
 
-    private var graveyardView: some View {
-        List {
-            Section {
-                if graveyard.isEmpty {
-                    if #available(iOS 17.0, *) {
-                        ContentUnavailableView("No completed tasks", systemImage: "archivebox")
-                    } else {
-                        UnavailableContentView(title: "No completed tasks", systemImage: "archivebox")
-                    }
-                }
-
-                ForEach(graveyard) { item in
-                    GraveyardRow(item: item, onRestore: { onRestore(item) })
-                }
-                .onDelete { offsets in
-                    graveyard.remove(atOffsets: offsets)
-                }
-            } footer: {
-                Text("Restore a task to put it back in the work area.")
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Task Graveyard")
-    }
-
-    private func removeSeries(at offsets: IndexSet) {
-        let ids = offsets.map { series[$0].id }
-        series.remove(atOffsets: offsets)
-        items.removeAll { item in
-            guard let seriesID = item.seriesID else { return false }
-            return ids.contains(seriesID)
-        }
-        graveyard.removeAll { item in
-            guard let seriesID = item.seriesID else { return false }
-            return ids.contains(seriesID)
-        }
-    }
-
-    private func removeSeries(_ entry: RecurringSeries) {
-        guard let index = series.firstIndex(where: { $0.id == entry.id }) else { return }
-        removeSeries(at: IndexSet(integer: index))
-    }
-
-    private func updateSeries(_ updated: RecurringSeries) {
-        guard let index = series.firstIndex(where: { $0.id == updated.id }) else { return }
-        var newSeries = updated
-        newSeries.lastGeneratedDate = series[index].lastGeneratedDate
-        series[index] = newSeries
-        let dueDate = updated.dueDateOffsetDays.flatMap { offset in
-            Calendar.current.date(byAdding: .day, value: offset, to: newSeries.lastGeneratedDate)
-        }
-        for itemIndex in items.indices {
-            if items[itemIndex].seriesID == updated.id {
-                items[itemIndex].title = updated.title
-                items[itemIndex].priority = updated.priority
-                items[itemIndex].dueDate = dueDate
-            }
-        }
-        for itemIndex in graveyard.indices {
-            if graveyard[itemIndex].seriesID == updated.id {
-                graveyard[itemIndex].title = updated.title
-                graveyard[itemIndex].priority = updated.priority
-                graveyard[itemIndex].dueDate = dueDate
-            }
+    private var sortedTaskIndices: [Int] {
+        tasks.indices.sorted { lhs, rhs in
+            taskSortComparator(tasks[lhs], tasks[rhs])
         }
     }
 }
 
-private enum WorkAreaSheet: Identifiable {
-    case recurringSeries
-    case graveyard
+private struct ProjectsView: View {
+    @Binding var projects: [ProjectItem]
+    let onComplete: (ProjectItem) -> Void
 
-    var id: String {
-        switch self {
-        case .recurringSeries:
-            return "recurringSeries"
-        case .graveyard:
-            return "graveyard"
+    var body: some View {
+        List {
+            Section {
+                if projects.isEmpty {
+                    if #available(iOS 17.0, *) {
+                        ContentUnavailableView("No project items yet", systemImage: "tray")
+                    } else {
+                        UnavailableContentView(title: "No project items yet", systemImage: "tray")
+                    }
+                }
+                ForEach($projects) { $project in
+                    ProjectRow(project: $project, onComplete: onComplete)
+                }
+            } header: {
+                Text("Projects")
+            }
         }
+        .listStyle(.insetGrouped)
+    }
+}
+
+private struct GuideView: View {
+    @Binding var tasks: [TaskItem]
+    @Binding var projects: [ProjectItem]
+    let onCompleteTask: (TaskItem) -> Void
+    let onMarkWorked: (TaskItem) -> Void
+    let onCompleteProject: (ProjectItem) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let task = topTask {
+                    GuideTaskCard(task: task)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            onCompleteTask(task)
+                        } label: {
+                            Label("Complete", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button {
+                            onMarkWorked(task)
+                        } label: {
+                            Label("Worked", systemImage: "bolt.fill")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if task.dueDate == nil, task.priority < 5 {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Projects")
+                                .font(.headline)
+                            if projects.isEmpty {
+                                Text("No project items ready.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(projects) { project in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(project.title)
+                                                .font(.subheadline.weight(.semibold))
+                                            if !project.detail.isEmpty {
+                                                Text(project.detail)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Button {
+                                            onCompleteProject(project)
+                                        } label: {
+                                            Image(systemName: "checkmark.circle")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .accessibilityLabel("Complete project item")
+                                    }
+                                    .padding(.vertical, 6)
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                } else {
+                    if #available(iOS 17.0, *) {
+                        ContentUnavailableView("No tasks ready", systemImage: "sparkles")
+                    } else {
+                        UnavailableContentView(title: "No tasks ready", systemImage: "sparkles")
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var topTask: TaskItem? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let availableTasks = tasks.filter { task in
+            guard task.status == .active else { return false }
+            if let workedAt = task.lastWorkedAt {
+                return calendar.startOfDay(for: workedAt) != today
+            }
+            return true
+        }
+        return availableTasks.sorted(by: taskSortComparator).first
     }
 }
 
@@ -878,87 +789,55 @@ private struct UnavailableContentView: View {
     }
 }
 
-private struct ListItemRow: View {
-    let item: TodoItem
+private struct IdeaRow: View {
+    let idea: IdeaItem
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(item.title)
-                    .font(.headline)
-
-                HStack(spacing: 8) {
-                    Label("P\(item.priority)", systemImage: "flag.fill")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if let dueDate = item.dueDate {
-                        Label {
-                            Text(dueDate, style: .date)
-                        } icon: {
-                            Image(systemName: "calendar")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    } else {
-                        Text("No due date")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let scheduledDate = item.scheduledDate {
-                        Label {
-                            Text(scheduledDate, style: .date)
-                        } icon: {
-                            Image(systemName: "clock")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(idea.title)
+                .font(.headline)
+            if !idea.detail.isEmpty {
+                Text(idea.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
+        .padding(.vertical, 6)
     }
 }
 
-private struct WorkItemRow: View {
-    @Binding var item: TodoItem
-    var onComplete: ((TodoItem) -> Void)? = nil
-    var onMoveToBacklog: ((TodoItem) -> Void)? = nil
+private struct TaskRow: View {
+    @Binding var task: TaskItem
+    let allTasks: [TaskItem]
+    let onComplete: (TaskItem) -> Void
 
     @State private var isExpanded = false
-    @State private var subtaskDraft = ""
     @State private var showDueDatePicker = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
+                    Text(task.title)
                         .font(.headline)
-                        .foregroundStyle(item.status == .onHold ? .secondary : .primary)
-
+                        .foregroundStyle(task.status == .onHold ? .secondary : .primary)
                     HStack(spacing: 8) {
-                        Label("P\(item.priority)", systemImage: "flag.fill")
+                        Label("P\(task.priority)", systemImage: "flag.fill")
                             .labelStyle(.titleAndIcon)
                             .font(.caption)
-                            .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
-
-                        if let dueDate = item.dueDate {
+                            .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
+                        if let dueDate = task.dueDate {
                             Label {
                                 Text(dueDate, style: .date)
                             } icon: {
                                 Image(systemName: "calendar")
                             }
                             .font(.caption)
-                            .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
+                            .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
                         } else {
                             Text("No due date")
                                 .font(.caption)
-                                .foregroundStyle(item.status == .onHold ? .tertiary : .secondary)
+                                .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
                         }
                     }
                 }
@@ -976,7 +855,7 @@ private struct WorkItemRow: View {
                 .buttonStyle(.plain)
             }
 
-            Picker("Status", selection: statusBinding) {
+            Picker("Status", selection: $task.status) {
                 ForEach(WorkingStatus.allCases) { status in
                     Text(status.rawValue).tag(status)
                 }
@@ -985,23 +864,16 @@ private struct WorkItemRow: View {
 
             HStack(spacing: 12) {
                 Button {
-                    onComplete?(item)
+                    onComplete(task)
                 } label: {
                     Label("Complete", systemImage: "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button {
-                    onMoveToBacklog?(item)
-                } label: {
-                    Label("Backlog", systemImage: "arrow.uturn.backward")
-                }
-                .buttonStyle(.bordered)
             }
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Priority", selection: $item.priority) {
+                    Picker("Priority", selection: $task.priority) {
                         ForEach(1...5, id: \.self) { value in
                             Text("Priority \(value)").tag(value)
                         }
@@ -1010,7 +882,7 @@ private struct WorkItemRow: View {
 
                     Toggle("Has due date", isOn: dueDateToggle)
 
-                    if item.dueDate != nil {
+                    if task.dueDate != nil {
                         Button {
                             showDueDatePicker = true
                         } label: {
@@ -1034,61 +906,35 @@ private struct WorkItemRow: View {
 
                     Divider()
 
-                    Text("Subtasks")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    ForEach($item.subtasks) { $subtask in
-                        HStack {
-                            Toggle(subtask.title, isOn: $subtask.isDone)
-                            Spacer()
-                            Button {
-                                removeSubtask(subtask)
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.red)
-                            .accessibilityLabel("Remove subtask")
+                    Picker("Depends on", selection: dependencyBinding) {
+                        Text("None").tag(nil as UUID?)
+                        ForEach(allTasks.filter { $0.id != task.id }) { entry in
+                            Text(entry.title).tag(Optional(entry.id))
                         }
                     }
+                    .pickerStyle(.menu)
 
-                    HStack(spacing: 8) {
-                        TextField("Add subtask", text: $subtaskDraft)
-#if os(iOS)
-                            .textInputAutocapitalization(.sentences)
-#endif
-                        Button("Add") {
-                            addSubtask()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(subtaskDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if task.status == .onHold, dependencyBinding.wrappedValue == nil {
+                        Text("On-hold tasks can automatically resume when a dependency is completed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 4)
             }
         }
         .padding(.vertical, 6)
-        .opacity(item.status == .onHold ? 0.6 : 1)
-    }
-
-    private var statusBinding: Binding<WorkingStatus> {
-        Binding(
-            get: { item.status ?? .active },
-            set: { newValue in
-                item.status = newValue
-            }
-        )
+        .opacity(task.status == .onHold ? 0.6 : 1)
     }
 
     private var dueDateToggle: Binding<Bool> {
         Binding(
-            get: { item.dueDate != nil },
+            get: { task.dueDate != nil },
             set: { hasDueDate in
                 if hasDueDate {
-                    item.dueDate = item.dueDate ?? Date()
+                    task.dueDate = task.dueDate ?? Date()
                 } else {
-                    item.dueDate = nil
+                    task.dueDate = nil
                 }
             }
         )
@@ -1096,53 +942,189 @@ private struct WorkItemRow: View {
 
     private var dueDateBinding: Binding<Date> {
         Binding(
-            get: { item.dueDate ?? Date() },
-            set: { item.dueDate = $0 }
+            get: { task.dueDate ?? Date() },
+            set: { task.dueDate = $0 }
         )
     }
 
-    private func addSubtask() {
-        let trimmed = subtaskDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        item.subtasks.append(Subtask(title: trimmed))
-        subtaskDraft = ""
-    }
-
-    private func removeSubtask(_ subtask: Subtask) {
-        item.subtasks.removeAll { $0.id == subtask.id }
+    private var dependencyBinding: Binding<UUID?> {
+        Binding(
+            get: { task.dependencyID },
+            set: { newValue in
+                task.dependencyID = newValue
+            }
+        )
     }
 }
 
-private struct GraveyardRow: View {
-    let item: TodoItem
-    let onRestore: () -> Void
+private struct ProjectRow: View {
+    @Binding var project: ProjectItem
+    let onComplete: (ProjectItem) -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
-                    .font(.headline)
-                Text("Completed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.title)
+                        .font(.headline)
+                        .foregroundStyle(project.status == .onHold ? .secondary : .primary)
+                    if !project.detail.isEmpty {
+                        Text(project.detail)
+                            .font(.caption)
+                            .foregroundStyle(project.status == .onHold ? .tertiary : .secondary)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    onComplete(project)
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Complete project item")
             }
 
-            Spacer()
-
-            Button {
-                onRestore()
-            } label: {
-                Label("Restore", systemImage: "arrow.uturn.backward")
+            Picker("Status", selection: $project.status) {
+                ForEach(WorkingStatus.allCases) { status in
+                    Text(status.rawValue).tag(status)
+                }
             }
-            .buttonStyle(.bordered)
+            .pickerStyle(.segmented)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .opacity(project.status == .onHold ? 0.6 : 1)
     }
 }
 
-private struct AddItemSheet: View {
-    let kind: ListKind
-    let onAdd: (TodoItem) -> Void
+private struct GuideTaskCard: View {
+    let task: TaskItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(task.title)
+                .font(.title3.weight(.semibold))
+            HStack(spacing: 8) {
+                Label("P\(task.priority)", systemImage: "flag.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let dueDate = task.dueDate {
+                    Label {
+                        Text(dueDate, style: .date)
+                    } icon: {
+                        Image(systemName: "calendar")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text("No due date")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(task.status.rawValue)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+    }
+}
+
+private struct AddIdeaSheet: View {
+    let onAdd: (IdeaItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var detail = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Idea") {
+                    TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
+                    TextField("Description", text: $detail, axis: .vertical)
+                }
+            }
+            .navigationTitle("Add Idea")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        onAdd(IdeaItem(title: trimmed, detail: detail.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct EditIdeaSheet: View {
+    let idea: IdeaItem
+    let onSave: (IdeaItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title: String
+    @State private var detail: String
+
+    init(idea: IdeaItem, onSave: @escaping (IdeaItem) -> Void) {
+        self.idea = idea
+        self.onSave = onSave
+        _title = State(initialValue: idea.title)
+        _detail = State(initialValue: idea.detail)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Idea") {
+                    TextField("Title", text: $title)
+#if os(iOS)
+                        .textInputAutocapitalization(.sentences)
+#endif
+                    TextField("Description", text: $detail, axis: .vertical)
+                }
+            }
+            .navigationTitle("Edit Idea")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        onSave(IdeaItem(id: idea.id, title: trimmed, detail: detail.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AddTaskSheet: View {
+    let onAdd: (TaskItem, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1187,7 +1169,7 @@ private struct AddItemSheet: View {
                         }
                     }
 
-                    Toggle("Schedule for work area", isOn: $isScheduled)
+                    Toggle("Schedule for later", isOn: $isScheduled)
                     if isScheduled {
                         Button {
                             showScheduledDatePicker = true
@@ -1211,19 +1193,23 @@ private struct AddItemSheet: View {
                     }
                 }
             }
-            .navigationTitle(kind == .tasks ? "Add Task" : "Add Idea")
+            .navigationTitle("Add Task")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
-                        let item = TodoItem(
+                        let now = Date()
+                        let task = TaskItem(
                             title: trimmed,
                             priority: priority,
                             dueDate: hasDueDate ? dueDate : nil,
+                            status: .active,
+                            createdAt: now,
+                            lastPriorityBumpDate: now,
                             scheduledDate: isScheduled ? scheduledDate : nil
                         )
-                        onAdd(item)
+                        onAdd(task, isScheduled)
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -1238,14 +1224,15 @@ private struct AddItemSheet: View {
     }
 }
 
-private struct EditItemSheet: View {
-    let item: TodoItem
-    let onSave: (TodoItem) -> Void
+private struct EditTaskSheet: View {
+    let task: TaskItem
+    let onSave: (TaskItem) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var title: String
     @State private var priority: Int
+    @State private var status: WorkingStatus
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
     @State private var showDueDatePicker = false
@@ -1253,15 +1240,16 @@ private struct EditItemSheet: View {
     @State private var scheduledDate: Date
     @State private var showScheduledDatePicker = false
 
-    init(item: TodoItem, onSave: @escaping (TodoItem) -> Void) {
-        self.item = item
+    init(task: TaskItem, onSave: @escaping (TaskItem) -> Void) {
+        self.task = task
         self.onSave = onSave
-        _title = State(initialValue: item.title)
-        _priority = State(initialValue: item.priority)
-        _hasDueDate = State(initialValue: item.dueDate != nil)
-        _dueDate = State(initialValue: item.dueDate ?? Date())
-        _isScheduled = State(initialValue: item.scheduledDate != nil)
-        _scheduledDate = State(initialValue: item.scheduledDate ?? Date())
+        _title = State(initialValue: task.title)
+        _priority = State(initialValue: task.priority)
+        _status = State(initialValue: task.status)
+        _hasDueDate = State(initialValue: task.dueDate != nil)
+        _dueDate = State(initialValue: task.dueDate ?? Date())
+        _isScheduled = State(initialValue: task.scheduledDate != nil)
+        _scheduledDate = State(initialValue: task.scheduledDate ?? Date())
     }
 
     var body: some View {
@@ -1272,6 +1260,11 @@ private struct EditItemSheet: View {
 #if os(iOS)
                         .textInputAutocapitalization(.sentences)
 #endif
+                    Picker("Status", selection: $status) {
+                        ForEach(WorkingStatus.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
                     Stepper("Priority \(priority)", value: $priority, in: 1...5)
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
@@ -1296,7 +1289,7 @@ private struct EditItemSheet: View {
                         }
                     }
 
-                    Toggle("Schedule for work area", isOn: $isScheduled)
+                    Toggle("Schedule for later", isOn: $isScheduled)
                     if isScheduled {
                         Button {
                             showScheduledDatePicker = true
@@ -1320,15 +1313,16 @@ private struct EditItemSheet: View {
                     }
                 }
             }
-            .navigationTitle("Edit Item")
+            .navigationTitle("Edit Task")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
-                        var updated = item
+                        var updated = task
                         updated.title = trimmed
                         updated.priority = priority
+                        updated.status = status
                         updated.dueDate = hasDueDate ? dueDate : nil
                         updated.scheduledDate = isScheduled ? scheduledDate : nil
                         onSave(updated)
@@ -1344,6 +1338,241 @@ private struct EditItemSheet: View {
             }
         }
     }
+}
+
+private struct ScheduledTasksView: View {
+    @Binding var scheduledTasks: [TaskItem]
+    let onEdit: (TaskItem) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if scheduledTasks.isEmpty {
+                        if #available(iOS 17.0, *) {
+                            ContentUnavailableView("No scheduled tasks", systemImage: "calendar")
+                        } else {
+                            UnavailableContentView(title: "No scheduled tasks", systemImage: "calendar")
+                        }
+                    }
+                    ForEach(scheduledTasks) { task in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(task.title)
+                                .font(.headline)
+                            HStack(spacing: 8) {
+                                Label("P\(task.priority)", systemImage: "flag.fill")
+                                    .labelStyle(.titleAndIcon)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let scheduledDate = task.scheduledDate {
+                                    Label {
+                                        Text(scheduledDate, style: .date)
+                                    } icon: {
+                                        Image(systemName: "clock")
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                if let dueDate = task.dueDate {
+                                    Label {
+                                        Text(dueDate, style: .date)
+                                    } icon: {
+                                        Image(systemName: "calendar")
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                onEdit(task)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+
+                            Button(role: .destructive) {
+                                scheduledTasks.removeAll { $0.id == task.id }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Scheduled Tasks")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Scheduled Tasks")
+        }
+    }
+}
+
+private struct RecurringSeriesView: View {
+    @Binding var series: [RecurringSeries]
+    @Binding var tasks: [TaskItem]
+
+    @State private var showingAddSeries = false
+    @State private var navigationPath = NavigationPath()
+
+    var body: some View {
+        NavigationStack(path: $navigationPath) {
+            List {
+                Section {
+                    if series.isEmpty {
+                        if #available(iOS 17.0, *) {
+                            ContentUnavailableView("No recurring tasks", systemImage: "repeat")
+                        } else {
+                            UnavailableContentView(title: "No recurring tasks", systemImage: "repeat")
+                        }
+                    }
+
+                    ForEach(series) { entry in
+                        NavigationLink(value: entry) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.title)
+                                    .font(.headline)
+                                Text(seriesDescription(entry))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(seriesMeta(entry))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                navigationPath.append(entry)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+
+                            Button(role: .destructive) {
+                                removeSeries(entry)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        removeSeries(at: offsets)
+                    }
+
+                    Button {
+                        showingAddSeries = true
+                    } label: {
+                        Label("Add recurring task", systemImage: "repeat")
+                    }
+                } footer: {
+                    Text("Recurring tasks generate new items on their schedule. If a previous item is still active, you'll receive a reminder instead of a duplicate.")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Recurring Tasks")
+            .navigationDestination(for: RecurringSeries.self) { entry in
+                EditSeriesSheet(series: entry) { updated in
+                    updateSeries(updated)
+                }
+            }
+            .sheet(isPresented: $showingAddSeries) {
+                AddSeriesSheet { newSeries in
+                    series.append(newSeries)
+                    addSeriesItem(newSeries)
+                }
+            }
+        }
+    }
+
+    private func addSeriesItem(_ entry: RecurringSeries, generationDate: Date = Date()) {
+        if tasks.contains(where: { $0.seriesID == entry.id }) { return }
+        let dueDate = entry.dueDateOffsetDays.flatMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: generationDate)
+        }
+        let newItem = TaskItem(
+            title: entry.title,
+            priority: entry.priority,
+            dueDate: dueDate,
+            status: .active,
+            createdAt: generationDate,
+            lastPriorityBumpDate: generationDate,
+            seriesID: entry.id
+        )
+        tasks.insert(newItem, at: 0)
+    }
+
+    private func removeSeries(at offsets: IndexSet) {
+        let ids = offsets.map { series[$0].id }
+        series.remove(atOffsets: offsets)
+        tasks.removeAll { item in
+            guard let seriesID = item.seriesID else { return false }
+            return ids.contains(seriesID)
+        }
+    }
+
+    private func removeSeries(_ entry: RecurringSeries) {
+        guard let index = series.firstIndex(where: { $0.id == entry.id }) else { return }
+        removeSeries(at: IndexSet(integer: index))
+    }
+
+    private func updateSeries(_ updated: RecurringSeries) {
+        guard let index = series.firstIndex(where: { $0.id == updated.id }) else { return }
+        var newSeries = updated
+        newSeries.lastGeneratedDate = series[index].lastGeneratedDate
+        series[index] = newSeries
+        let dueDate = updated.dueDateOffsetDays.flatMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: newSeries.lastGeneratedDate)
+        }
+        for itemIndex in tasks.indices {
+            if tasks[itemIndex].seriesID == updated.id {
+                tasks[itemIndex].title = updated.title
+                tasks[itemIndex].priority = updated.priority
+                tasks[itemIndex].dueDate = dueDate
+            }
+        }
+    }
+
+    private func seriesDescription(_ entry: RecurringSeries) -> String {
+        switch entry.frequency {
+        case .everyDays:
+            return "Every \(entry.intervalDays) days"
+        case .weekly:
+            let days = Weekday.allCases.filter { entry.weeklyDays.contains($0) }
+                .map { $0.rawValue }
+                .joined(separator: ", ")
+            return "Weekly on \(days)"
+        }
+    }
+
+    private func seriesMeta(_ entry: RecurringSeries) -> String {
+        var parts: [String] = ["P\(entry.priority)"]
+        if let offset = entry.dueDateOffsetDays {
+            parts.append("Due \(offset) days after")
+        } else {
+            parts.append("No due date")
+        }
+        return parts.joined(separator: " • ")
+    }
+}
+
+private func taskSortComparator(_ left: TaskItem, _ right: TaskItem) -> Bool {
+    let leftHasDue = left.dueDate != nil
+    let rightHasDue = right.dueDate != nil
+
+    if leftHasDue != rightHasDue {
+        return leftHasDue && !rightHasDue
+    }
+
+    if let leftDue = left.dueDate, let rightDue = right.dueDate, leftDue != rightDue {
+        return leftDue < rightDue
+    }
+
+    if left.priority != right.priority {
+        return left.priority > right.priority
+    }
+
+    return left.title.localizedCaseInsensitiveCompare(right.title) == .orderedAscending
 }
 
 private struct AddSeriesSheet: View {
@@ -1578,8 +1807,8 @@ private final class NotificationManager {
             dateComponents.minute = reminder.minute
 
             let content = UNMutableNotificationContent()
-            content.title = "Check your work areas"
-            content.body = "Review the tasks and ideas in your work areas to make sure they fit today."
+            content.title = "Review your tasks"
+            content.body = "Check your tasks, projects, and ideas so your day stays on track."
             content.sound = .default
 
             let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
@@ -1588,10 +1817,10 @@ private final class NotificationManager {
         }
     }
 
-    func sendSeriesPendingReminder(title: String, listKind: ListKind, seriesID: UUID) {
+    func sendSeriesPendingReminder(title: String, seriesID: UUID) {
         let content = UNMutableNotificationContent()
         content.title = "Recurring task still active"
-        content.body = "\(title) is still in your \(listKind == .tasks ? "tasks" : "ideas") work area. Complete it before the next scheduled entry."
+        content.body = "\(title) is still in your tasks list. Complete it before the next scheduled entry."
         content.sound = .default
 
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
