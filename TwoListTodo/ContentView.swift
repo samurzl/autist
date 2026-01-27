@@ -704,23 +704,26 @@ private struct GuideView: View {
                         Button {
                             onCompleteTask(task)
                         } label: {
-                            Label("Complete", systemImage: "checkmark.circle")
+                            Image(systemName: "checkmark.circle")
                         }
                         .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Complete")
 
                         Button {
                             onMarkWorked(task)
                         } label: {
-                            Label("Worked", systemImage: "bolt.fill")
+                            Image(systemName: "bolt.fill")
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityLabel("Worked")
 
                         Button {
                             onHoldTask(task)
                         } label: {
-                            Label("On Hold", systemImage: "pause.circle")
+                            Image(systemName: "pause.circle")
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityLabel("On Hold")
                     }
 
                     if task.dueDate == nil, task.priority < 5 {
@@ -776,16 +779,18 @@ private struct GuideView: View {
                             Button {
                                 onCompleteTask(quickTask)
                             } label: {
-                                Label("Complete", systemImage: "checkmark.circle")
+                                Image(systemName: "checkmark.circle")
                             }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityLabel("Complete")
 
                             Button {
                                 onHoldTask(quickTask)
                             } label: {
-                                Label("On Hold", systemImage: "pause.circle")
+                                Image(systemName: "pause.circle")
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityLabel("On Hold")
                         }
                     } else {
                         Text("No quick wins with estimated times yet.")
