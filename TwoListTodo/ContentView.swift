@@ -579,7 +579,7 @@ private struct WorkAreaView: View {
     let onAddSeriesTapped: () -> Void
 
     @State private var activeSheet: WorkAreaSheet? = nil
-    @State private var editingSeries: RecurringSeries? = nil
+    @State private var seriesNavigationPath = NavigationPath()
 
     var body: some View {
         List {
@@ -620,7 +620,7 @@ private struct WorkAreaView: View {
             }
         }
         .sheet(item: $activeSheet) { sheet in
-            NavigationStack {
+            NavigationStack(path: $seriesNavigationPath) {
                 switch sheet {
                 case .recurringSeries:
                     recurringSeriesView
@@ -628,6 +628,9 @@ private struct WorkAreaView: View {
                     graveyardView
                 }
             }
+        }
+        .onChange(of: activeSheet) { _ in
+            seriesNavigationPath = NavigationPath()
         }
     }
 
@@ -665,13 +668,7 @@ private struct WorkAreaView: View {
                 }
 
                 ForEach(series) { entry in
-                    NavigationLink(
-                        destination: EditSeriesSheet(series: entry) { updated in
-                            updateSeries(updated)
-                        },
-                        tag: entry,
-                        selection: $editingSeries
-                    ) {
+                    NavigationLink(value: entry) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.title)
                                 .font(.headline)
@@ -685,7 +682,7 @@ private struct WorkAreaView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
-                            editingSeries = entry
+                            seriesNavigationPath.append(entry)
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
@@ -716,7 +713,7 @@ private struct WorkAreaView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Recurring Series")
-        .navigationDestination(item: $editingSeries) { entry in
+        .navigationDestination(for: RecurringSeries.self) { entry in
             EditSeriesSheet(series: entry) { updated in
                 updateSeries(updated)
             }
