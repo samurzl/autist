@@ -39,8 +39,8 @@ private struct TaskItem: Identifiable, Hashable, Codable {
 
 private enum AppTab: String, CaseIterable, Identifiable, Codable {
     case ideas = "Ideas"
-    case tasks = "Tasks"
     case projects = "Projects"
+    case tasks = "Tasks"
     case guide = "Guide"
 
     var id: String { rawValue }
@@ -89,7 +89,7 @@ private struct RecurringSeries: Identifiable, Hashable, Codable {
 }
 
 private struct AppState: Codable {
-    var selectedTab: AppTab = .ideas
+    var selectedTab: AppTab = .guide
     var ideas: [IdeaItem] = []
     var projects: [ProjectItem] = []
     var tasks: [TaskItem] = []
@@ -131,7 +131,7 @@ private final class AppStatePersistence {
 
 @MainActor
 private final class AppStateStore: ObservableObject {
-    @Published var selectedTab: AppTab = .ideas
+    @Published var selectedTab: AppTab = .guide
     @Published var ideas: [IdeaItem] = []
     @Published var projects: [ProjectItem] = []
     @Published var tasks: [TaskItem] = []
