@@ -27,6 +27,7 @@ private struct TaskItem: Identifiable, Hashable, Codable {
     var title: String
     var priority: Int
     var dueDate: Date?
+    var estimatedMinutes: Int? = nil
     var status: WorkingStatus = .active
     var createdAt: Date = Date()
     var lastPriorityBumpDate: Date = Date()
@@ -246,6 +247,7 @@ struct ContentView: View {
                             projects: $store.projects,
                             onCompleteTask: completeTask,
                             onMarkWorked: markTaskWorked,
+                            onHoldTask: holdTask,
                             onCompleteProject: completeProject
                         )
                     }
@@ -401,6 +403,11 @@ struct ContentView: View {
     private func markTaskWorked(_ task: TaskItem) {
         guard let index = store.tasks.firstIndex(where: { $0.id == task.id }) else { return }
         store.tasks[index].lastWorkedAt = Date()
+    }
+
+    private func holdTask(_ task: TaskItem) {
+        guard let index = store.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        store.tasks[index].status = .onHold
     }
 
     private func activateDependentTasks(for completedTask: TaskItem) {
@@ -684,6 +691,7 @@ private struct GuideView: View {
     @Binding var projects: [ProjectItem]
     let onCompleteTask: (TaskItem) -> Void
     let onMarkWorked: (TaskItem) -> Void
+    let onHoldTask: (TaskItem) -> Void
     let onCompleteProject: (ProjectItem) -> Void
 
     var body: some View {
@@ -704,6 +712,13 @@ private struct GuideView: View {
                             onMarkWorked(task)
                         } label: {
                             Label("Worked", systemImage: "bolt.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            onHoldTask(task)
+                        } label: {
+                            Label("On Hold", systemImage: "pause.circle")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -750,6 +765,34 @@ private struct GuideView: View {
                         UnavailableContentView(title: "No tasks ready", systemImage: "sparkles")
                     }
                 }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Lowest hanging fruit")
+                        .font(.headline)
+                    if let quickTask = lowestHangingFruit {
+                        GuideTaskCard(task: quickTask)
+
+                        HStack(spacing: 12) {
+                            Button {
+                                onCompleteTask(quickTask)
+                            } label: {
+                                Label("Complete", systemImage: "checkmark.circle")
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                onHoldTask(quickTask)
+                            } label: {
+                                Label("On Hold", systemImage: "pause.circle")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else {
+                        Text("No quick wins with estimated times yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -759,14 +802,33 @@ private struct GuideView: View {
     private var topTask: TaskItem? {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let availableTasks = tasks.filter { task in
+        return availableTasks.sorted(by: taskSortComparator).first
+    }
+
+    private var availableTasks: [TaskItem] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        return tasks.filter { task in
             guard task.status == .active else { return false }
             if let workedAt = task.lastWorkedAt {
                 return calendar.startOfDay(for: workedAt) != today
             }
             return true
         }
-        return availableTasks.sorted(by: taskSortComparator).first
+    }
+
+    private var lowestHangingFruit: TaskItem? {
+        availableTasks
+            .filter { $0.estimatedMinutes != nil }
+            .sorted { left, right in
+                guard let leftMinutes = left.estimatedMinutes,
+                      let rightMinutes = right.estimatedMinutes else { return false }
+                if leftMinutes != rightMinutes {
+                    return leftMinutes < rightMinutes
+                }
+                return taskSortComparator(left, right)
+            }
+            .first
     }
 }
 
@@ -826,6 +888,15 @@ private struct TaskRow: View {
                             .labelStyle(.titleAndIcon)
                             .font(.caption)
                             .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
+                        if let estimatedMinutes = task.estimatedMinutes {
+                            Label("\(estimateDescription(estimatedMinutes))", systemImage: "hourglass")
+                                .font(.caption)
+                                .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
+                        } else {
+                            Text("No estimate")
+                                .font(.caption)
+                                .foregroundStyle(task.status == .onHold ? .tertiary : .secondary)
+                        }
                         if let dueDate = task.dueDate {
                             Label {
                                 Text(dueDate, style: .date)
@@ -879,6 +950,17 @@ private struct TaskRow: View {
                         }
                     }
                     .pickerStyle(.menu)
+
+                    Toggle("Has estimate", isOn: estimateToggle)
+
+                    if task.estimatedMinutes != nil {
+                        Stepper(
+                            "Estimated time \(estimateDescription(estimateMinutesBinding.wrappedValue))",
+                            value: estimateMinutesBinding,
+                            in: 5...480,
+                            step: 5
+                        )
+                    }
 
                     Toggle("Has due date", isOn: dueDateToggle)
 
@@ -937,6 +1019,26 @@ private struct TaskRow: View {
                     task.dueDate = nil
                 }
             }
+        )
+    }
+
+    private var estimateToggle: Binding<Bool> {
+        Binding(
+            get: { task.estimatedMinutes != nil },
+            set: { hasEstimate in
+                if hasEstimate {
+                    task.estimatedMinutes = task.estimatedMinutes ?? 30
+                } else {
+                    task.estimatedMinutes = nil
+                }
+            }
+        )
+    }
+
+    private var estimateMinutesBinding: Binding<Int> {
+        Binding(
+            get: { task.estimatedMinutes ?? 30 },
+            set: { task.estimatedMinutes = $0 }
         )
     }
 
@@ -1010,6 +1112,16 @@ private struct GuideTaskCard: View {
                     .labelStyle(.titleAndIcon)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let estimatedMinutes = task.estimatedMinutes {
+                    Label(estimateDescription(estimatedMinutes), systemImage: "hourglass")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No estimate")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let dueDate = task.dueDate {
                     Label {
@@ -1130,6 +1242,8 @@ private struct AddTaskSheet: View {
 
     @State private var title = ""
     @State private var priority = 3
+    @State private var hasEstimate = false
+    @State private var estimatedMinutes = 30
     @State private var hasDueDate = false
     @State private var dueDate = Date()
     @State private var showDueDatePicker = false
@@ -1146,6 +1260,15 @@ private struct AddTaskSheet: View {
                         .textInputAutocapitalization(.sentences)
 #endif
                     Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has estimate", isOn: $hasEstimate)
+                    if hasEstimate {
+                        Stepper(
+                            "Estimated time \(estimateDescription(estimatedMinutes))",
+                            value: $estimatedMinutes,
+                            in: 5...480,
+                            step: 5
+                        )
+                    }
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
                         Button {
@@ -1204,6 +1327,7 @@ private struct AddTaskSheet: View {
                             title: trimmed,
                             priority: priority,
                             dueDate: hasDueDate ? dueDate : nil,
+                            estimatedMinutes: hasEstimate ? estimatedMinutes : nil,
                             status: .active,
                             createdAt: now,
                             lastPriorityBumpDate: now,
@@ -1233,6 +1357,8 @@ private struct EditTaskSheet: View {
     @State private var title: String
     @State private var priority: Int
     @State private var status: WorkingStatus
+    @State private var hasEstimate: Bool
+    @State private var estimatedMinutes: Int
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
     @State private var showDueDatePicker = false
@@ -1246,6 +1372,8 @@ private struct EditTaskSheet: View {
         _title = State(initialValue: task.title)
         _priority = State(initialValue: task.priority)
         _status = State(initialValue: task.status)
+        _hasEstimate = State(initialValue: task.estimatedMinutes != nil)
+        _estimatedMinutes = State(initialValue: task.estimatedMinutes ?? 30)
         _hasDueDate = State(initialValue: task.dueDate != nil)
         _dueDate = State(initialValue: task.dueDate ?? Date())
         _isScheduled = State(initialValue: task.scheduledDate != nil)
@@ -1266,6 +1394,15 @@ private struct EditTaskSheet: View {
                         }
                     }
                     Stepper("Priority \(priority)", value: $priority, in: 1...5)
+                    Toggle("Has estimate", isOn: $hasEstimate)
+                    if hasEstimate {
+                        Stepper(
+                            "Estimated time \(estimateDescription(estimatedMinutes))",
+                            value: $estimatedMinutes,
+                            in: 5...480,
+                            step: 5
+                        )
+                    }
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
                         Button {
@@ -1324,6 +1461,7 @@ private struct EditTaskSheet: View {
                         updated.priority = priority
                         updated.status = status
                         updated.dueDate = hasDueDate ? dueDate : nil
+                        updated.estimatedMinutes = hasEstimate ? estimatedMinutes : nil
                         updated.scheduledDate = isScheduled ? scheduledDate : nil
                         onSave(updated)
                         dismiss()
@@ -1554,6 +1692,17 @@ private struct RecurringSeriesView: View {
         }
         return parts.joined(separator: " • ")
     }
+}
+
+private func estimateDescription(_ minutes: Int) -> String {
+    if minutes < 60 {
+        return "\(minutes)m"
+    }
+    let hours = Double(minutes) / 60.0
+    if minutes % 60 == 0 {
+        return String(format: "%.0fh", hours)
+    }
+    return String(format: "%.1fh", hours)
 }
 
 private func taskSortComparator(_ left: TaskItem, _ right: TaskItem) -> Bool {
