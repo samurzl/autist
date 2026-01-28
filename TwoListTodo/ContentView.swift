@@ -35,6 +35,7 @@ private struct TaskItem: Identifiable, Hashable, Codable {
     var lastWorkedAt: Date? = nil
     var scheduledDate: Date? = nil
     var seriesID: UUID? = nil
+    var onHoldSince: Date? = nil
 }
 
 private enum AppTab: String, CaseIterable, Identifiable, Codable {
@@ -316,12 +317,14 @@ struct ContentView: View {
                 processScheduledTasks()
                 processRecurringSeries()
                 updateTaskPriorities()
+                resetOnHoldTasksIfNeeded()
             }
             .onChange(of: scenePhase) { newValue in
                 if newValue == .active {
                     processScheduledTasks()
                     processRecurringSeries()
                     updateTaskPriorities()
+                    resetOnHoldTasksIfNeeded()
                 }
             }
         }
@@ -407,14 +410,14 @@ struct ContentView: View {
 
     private func holdTask(_ task: TaskItem) {
         guard let index = store.tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        store.tasks[index].status = .onHold
+        applyStatusChange(to: &store.tasks[index], newStatus: .onHold)
     }
 
     private func activateDependentTasks(for completedTask: TaskItem) {
         for index in store.tasks.indices {
             if store.tasks[index].dependencyID == completedTask.id {
                 store.tasks[index].dependencyID = nil
-                store.tasks[index].status = .active
+                applyStatusChange(to: &store.tasks[index], newStatus: .active)
             }
         }
     }
@@ -440,7 +443,7 @@ struct ContentView: View {
         for index in indicesToMove.sorted(by: >) {
             var item = store.scheduledTasks.remove(at: index)
             item.scheduledDate = nil
-            item.status = .active
+            applyStatusChange(to: &item, newStatus: .active)
             store.tasks.insert(item, at: 0)
         }
     }
@@ -459,6 +462,33 @@ struct ContentView: View {
             store.tasks[index].priority = cappedPriority
             if let nextBumpDate = calendar.date(byAdding: .month, value: months, to: lastBump) {
                 store.tasks[index].lastPriorityBumpDate = nextBumpDate
+            }
+        }
+    }
+
+    private func resetOnHoldTasksIfNeeded() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let dueThreshold = calendar.date(byAdding: .day, value: 4, to: today) ?? today
+        resetOnHoldTasks(in: &store.tasks, today: today, dueThreshold: dueThreshold, calendar: calendar)
+        resetOnHoldTasks(in: &store.scheduledTasks, today: today, dueThreshold: dueThreshold, calendar: calendar)
+    }
+
+    private func resetOnHoldTasks(
+        in tasks: inout [TaskItem],
+        today: Date,
+        dueThreshold: Date,
+        calendar: Calendar
+    ) {
+        for index in tasks.indices {
+            guard tasks[index].status == .onHold else { continue }
+            let dueSoon = tasks[index].dueDate.map { calendar.startOfDay(for: $0) <= dueThreshold } ?? false
+            let onHoldSince = tasks[index].onHoldSince ?? today
+            let normalizedOnHold = calendar.startOfDay(for: onHoldSince)
+            tasks[index].onHoldSince = normalizedOnHold
+            let onHoldDays = calendar.dateComponents([.day], from: normalizedOnHold, to: today).day ?? 0
+            if dueSoon || onHoldDays >= 4 {
+                applyStatusChange(to: &tasks[index], newStatus: .active)
             }
         }
     }
@@ -793,7 +823,7 @@ private struct GuideView: View {
                             .accessibilityLabel("On Hold")
                         }
                     } else {
-                        Text("No quick wins with estimated times yet.")
+                        Text("No high-importance tasks under 30 minutes yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -824,15 +854,11 @@ private struct GuideView: View {
 
     private var lowestHangingFruit: TaskItem? {
         availableTasks
-            .filter { $0.estimatedMinutes != nil }
-            .sorted { left, right in
-                guard let leftMinutes = left.estimatedMinutes,
-                      let rightMinutes = right.estimatedMinutes else { return false }
-                if leftMinutes != rightMinutes {
-                    return leftMinutes < rightMinutes
-                }
-                return taskSortComparator(left, right)
+            .filter { task in
+                guard let minutes = task.estimatedMinutes else { return false }
+                return minutes <= 30
             }
+            .sorted(by: taskSortComparator)
             .first
     }
 }
@@ -937,6 +963,9 @@ private struct TaskRow: View {
                 }
             }
             .pickerStyle(.segmented)
+            .onChange(of: task.status) { newStatus in
+                applyStatusChange(to: &task, newStatus: newStatus)
+            }
 
             HStack(spacing: 12) {
                 Button {
@@ -1464,7 +1493,7 @@ private struct EditTaskSheet: View {
                         var updated = task
                         updated.title = trimmed
                         updated.priority = priority
-                        updated.status = status
+                        applyStatusChange(to: &updated, newStatus: status)
                         updated.dueDate = hasDueDate ? dueDate : nil
                         updated.estimatedMinutes = hasEstimate ? estimatedMinutes : nil
                         updated.scheduledDate = isScheduled ? scheduledDate : nil
@@ -1708,6 +1737,24 @@ private func estimateDescription(_ minutes: Int) -> String {
         return String(format: "%.0fh", hours)
     }
     return String(format: "%.1fh", hours)
+}
+
+private func applyStatusChange(
+    to task: inout TaskItem,
+    newStatus: WorkingStatus,
+    now: Date = Date()
+) {
+    if task.status != newStatus {
+        task.status = newStatus
+    }
+    switch newStatus {
+    case .active:
+        task.onHoldSince = nil
+    case .onHold:
+        if task.onHoldSince == nil {
+            task.onHoldSince = now
+        }
+    }
 }
 
 private func taskSortComparator(_ left: TaskItem, _ right: TaskItem) -> Bool {
