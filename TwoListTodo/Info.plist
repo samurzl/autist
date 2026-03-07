@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>Two-List Todo</string>
+    <string>TwoDoList</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -22,6 +22,16 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>TwoDoList uses your location to activate scheduled tasks when you reach their saved area.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>TwoDoList uses your location to let you draw task activation areas on the map and trigger them when you arrive.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>TwoDoList uses your location in the background so location-triggered tasks can activate when you arrive.</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
@@ -29,12 +39,23 @@
         <key>UISceneConfigurations</key>
         <dict/>
     </dict>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 </dict>
 </plist>

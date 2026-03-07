@@ -1,4 +1,4 @@
-# Two-List Todo Testing Protocol
+# TwoDoList Testing Protocol
 
 This protocol covers comprehensive manual and build verification for the iOS (iPhone) target.
 
@@ -142,12 +142,18 @@ Repeat in **Ideas List**.
 
 **Expected**: Series appears with the weekly schedule description.
 
-### 6.3 Deleting a recurring series
+### 6.3 Monthly recurring series
+1. Add another recurring series with **Monthly** frequency.
+2. Tap **Add**.
+
+**Expected**: Series appears with the monthly schedule description.
+
+### 6.4 Deleting a recurring series
 1. Delete a series entry in the recurring list.
 
 **Expected**: Series is removed.
 
-### 6.4 Duplicate prevention + reminder behavior
+### 6.5 Duplicate prevention + reminder behavior
 1. Ensure a recurring-series-generated item remains active.
 2. Wait until the next occurrence (use device time adjustments if needed).
 
@@ -171,7 +177,7 @@ Repeat in **Ideas List**.
 - Daily reminders at **6:00 AM** and **9:00 PM** are scheduled.
 
 ### 7.3 Recurring-series reminder
-1. Keep a recurring item active beyond its next schedule (from section 6.4).
+1. Keep a recurring item active beyond its next schedule (from section 6.5).
 
 **Expected**: Notification appears stating a recurring item is still active.
 

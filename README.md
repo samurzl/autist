@@ -1,4 +1,4 @@
-# Two-List Todo (iPhone)
+# TwoDoList (iPhone)
 
 This repository contains a native iPhone app built with SwiftUI. It provides two list inboxes (Tasks and Ideas) and two work areas so you can intentionally choose what you are focusing on today.
 
@@ -19,7 +19,7 @@ This repository contains a native iPhone app built with SwiftUI. It provides two
 - The Task Graveyard lets you restore a completed item back to the active work area.
 
 ### Recurring tasks
-- In each work area you can add **recurring series** (e.g., “every 2 days” or “weekly on Monday”).
+- In each work area you can add **recurring series** (e.g., “every 2 days”, “weekly on Monday”, or “monthly”).
 - When a series becomes due, the app adds a task to the work area.
 - If the previous instance from the same series is still active, the app skips the duplicate and sends a reminder notification instead.
 
@@ -30,6 +30,15 @@ This repository contains a native iPhone app built with SwiftUI. It provides two
 - These notifications remind you to review whether the work-area items are correct for the day ahead.
 
 > **Note:** Notifications require user permission the first time the app launches.
+
+### iCloud sync + Markdown notes
+- App state syncs through a shared file (`TwoListTodoState.json`) when sync storage is available.
+- Each idea, project, task, and improvement note also has its own Markdown file in `ItemNotes/`.
+- You can choose an iCloud Drive folder from app settings and the app will sync with that folder (works with Personal Team signing).
+- If no shared folder/container is available, the app falls back to local storage on-device.
+- Task notes are edited on a dedicated full-page note screen (`Notes` action), then synced to Markdown files.
+- The app also builds for Mac (Mac Catalyst), so you can edit notes in the same in-app editor on your MacBook.
+- App settings now includes `Open sync folder` to jump directly to the synced folder in Finder/Files for direct Markdown editing.
 
 ## Project structure
 
